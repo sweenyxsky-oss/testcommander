@@ -39,6 +39,8 @@ public partial class MainWindow : Window
             settings.AreDevToolsEnabled = false;
             settings.AreDefaultContextMenusEnabled = true;
             settings.IsStatusBarEnabled = false;
+            settings.IsPasswordAutosaveEnabled = false;
+            settings.IsGeneralAutofillEnabled = false;
             Browser.CoreWebView2.NavigationStarting += OnNavigationStarting;
             Browser.CoreWebView2.NewWindowRequested += OnNewWindowRequested;
             Browser.CoreWebView2.NavigationCompleted += (_, args) =>
