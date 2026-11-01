@@ -13,7 +13,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private string _status = "Starting browser…";
     private string _address = "https://www.travian.com/";
     private string _resourceSummary = "No village data captured yet";
-    private int? _selectedRetentionDays = 180;
+    private RetentionOption _selectedRetentionOption = new(180, "180 days");
     private bool _retentionInitialized;
 
     public ObservableCollection<CapturedResponse> RecentResponses { get; } = [];
@@ -30,7 +30,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public string Status { get => _status; set => Set(ref _status, value); }
     public string Address { get => _address; set => Set(ref _address, value); }
     public string ResourceSummary { get => _resourceSummary; set => Set(ref _resourceSummary, value); }
-    public int? SelectedRetentionDays { get => _selectedRetentionDays; private set => Set(ref _selectedRetentionDays, value); }
+    public RetentionOption SelectedRetentionOption { get => _selectedRetentionOption; private set => Set(ref _selectedRetentionOption, value); }
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public MainViewModel(DatabaseService database) => _database = database;
@@ -39,8 +39,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         if (!_retentionInitialized)
         {
-            SelectedRetentionDays = await _database.GetSnapshotRetentionDaysAsync();
-            await _database.PruneSnapshotsAsync(SelectedRetentionDays);
+            var retentionDays = await _database.GetSnapshotRetentionDaysAsync();
+            SelectedRetentionOption = RetentionOptions.First(option => option.Days == retentionDays);
+            await _database.PruneSnapshotsAsync(retentionDays);
             _retentionInitialized = true;
         }
 
@@ -60,7 +61,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
         ResourceSummary = ResourceOverviews.Count == 0
             ? "No village data captured yet"
-            : $"{ResourceOverviews.Count} village(s) • trend from up to {HistorySampleLimit} distinct samples • retention: {RetentionLabel(SelectedRetentionDays)}";
+            : $"{ResourceOverviews.Count} village(s) • trend from up to {HistorySampleLimit} distinct samples • retention: {SelectedRetentionOption.Label}";
     }
 
     public async Task SetSnapshotRetentionAsync(int? days)
@@ -68,19 +69,17 @@ public sealed class MainViewModel : INotifyPropertyChanged
         if (!RetentionOptions.Any(option => option.Days == days))
             throw new ArgumentOutOfRangeException(nameof(days), "Choose one of the available retention periods.");
 
-        if (SelectedRetentionDays == days && _retentionInitialized) return;
+        if (SelectedRetentionOption.Days == days && _retentionInitialized) return;
 
         await _database.SetSnapshotRetentionDaysAsync(days);
         var removed = await _database.PruneSnapshotsAsync(days);
-        SelectedRetentionDays = days;
+        SelectedRetentionOption = RetentionOptions.First(option => option.Days == days);
         _retentionInitialized = true;
         await RefreshAsync();
         Status = removed > 0
             ? $"Snapshot retention updated. Removed {removed:N0} expired sample(s)."
             : $"Snapshot retention updated: {RetentionLabel(days)}.";
     }
-
-    private static string RetentionLabel(int? days) => days.HasValue ? $"{days.Value} days" : "never";
 
     private void Set<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
     {
