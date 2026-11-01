@@ -13,7 +13,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private string _address = "https://www.travian.com/";
     private string _resourceSummary = "No village data captured yet";
     public ObservableCollection<CapturedResponse> RecentResponses { get; } = [];
-    public ObservableCollection<VillageSnapshot> Villages { get; } = [];
+    public ObservableCollection<VillageResourceOverview> ResourceOverviews { get; } = [];
     public string Status { get => _status; set => Set(ref _status, value); }
     public string Address { get => _address; set => Set(ref _address, value); }
     public string ResourceSummary { get => _resourceSummary; set => Set(ref _resourceSummary, value); }
@@ -24,10 +24,16 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public async Task RefreshAsync()
     {
         RecentResponses.Clear();
-        foreach (var response in await _database.GetRecentResponsesAsync()) RecentResponses.Add(response);
-        Villages.Clear();
-        foreach (var village in await _database.GetLatestSnapshotsAsync()) Villages.Add(village);
-        ResourceSummary = Villages.Count == 0 ? "No village data captured yet" : $"{Villages.Count} village snapshot(s) stored locally";
+        foreach (var response in await _database.GetRecentResponsesAsync())
+            RecentResponses.Add(response);
+
+        ResourceOverviews.Clear();
+        foreach (var snapshot in await _database.GetLatestSnapshotsAsync())
+            ResourceOverviews.Add(VillageResourceCalculator.Create(snapshot));
+
+        ResourceSummary = ResourceOverviews.Count == 0
+            ? "No village data captured yet"
+            : $"{ResourceOverviews.Count} village(s) • storage utilization from latest captured values";
     }
 
     private void Set<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
