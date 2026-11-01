@@ -83,5 +83,5 @@ public sealed class GamePayloadParserTests
 
     [Fact]
     public void InvalidJsonThrowsJsonException() =>
-        Assert.Throws<System.Text.Json.JsonException>(() => GamePayloadParser.Parse("{invalid"));
+        Assert.ThrowsAny<System.Text.Json.JsonException>(() => GamePayloadParser.Parse("{invalid"));
 }
