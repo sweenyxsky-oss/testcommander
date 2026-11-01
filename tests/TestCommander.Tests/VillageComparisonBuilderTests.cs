@@ -7,45 +7,70 @@ namespace TestCommander.Tests;
 public sealed class VillageComparisonBuilderTests
 {
     [Fact]
-    public void ComparisonSortsVillagesAndShowsStockCapacityUtilizationAndObservedDelta()
+    public void SortsVillagesAndShowsObservedStockChangesAndStorageUse()
     {
-        var overview = VillageResourceCalculator.Create(
-            new VillageSnapshot("Zulu", 750, 500, 250, 1000, 1000, 2000, DateTimeOffset.UtcNow),
-            new VillageSnapshot("Zulu", 650, 500, 250, 900, 1000, 2000, DateTimeOffset.UtcNow.AddMinutes(-5)));
-        var other = VillageResourceCalculator.Create(
-            new VillageSnapshot("Alpha", 100, 200, 300, 400, 1000, 1000, DateTimeOffset.UtcNow));
+        var alpha = Create("Alpha", 150, 200, 300, 400, 1000, 800,
+            [new ResourceChange("Wood", 50), new ResourceChange("Clay", -25)]);
+        var beta = Create("Beta", 10, 20, 30, 40, 100, 80);
 
-        var rows = VillageComparisonBuilder.Create([overview, other]);
+        var rows = VillageComparisonBuilder.Create([beta, alpha]);
 
-        Assert.Equal(new[] { "Alpha", "Zulu" }, rows.Select(row => row.VillageName));
-        Assert.Contains("750", rows[1].Wood);
-        Assert.Contains("1000", rows[1].Wood);
-        Assert.Contains("75%", rows[1].Wood);
-        Assert.Contains("Δ +100", rows[1].Wood);
+        Assert.Equal(new[] { "Alpha", "Beta" }, rows.Select(row => row.VillageName));
+        Assert.Contains("150", rows[0].Wood);
+        Assert.Contains("Δ +50", rows[0].Wood);
+        Assert.Contains("Δ -25", rows[0].Clay);
+        Assert.Contains("15.0%", rows[0].GranaryUtilization);
+        Assert.Contains("W 15.0%", rows[0].WarehouseUtilization);
     }
 
     [Fact]
-    public void ComparisonKeepsMissingStockAndCapacityAsUnknown()
+    public void KeepsMissingStocksAndCapacitiesExplicit()
     {
-        var overview = VillageResourceCalculator.Create(
-            new VillageSnapshot("Partial", null, 250, null, 500, null, 0, DateTimeOffset.UtcNow));
+        var overview = Create("Partial", null, 20, 30, null, null, null);
 
         var row = Assert.Single(VillageComparisonBuilder.Create([overview]));
 
-        Assert.Equal("— / cap — · — · Δ —", row.Wood);
-        Assert.Equal("250 / cap — · — · Δ —", row.Clay);
-        Assert.Equal("— / cap — · — · Δ —", row.Iron);
-        Assert.Equal("500 / cap — · — · Δ —", row.Crop);
+        Assert.Equal("Not detected", row.Wood);
+        Assert.Equal("Not detected", row.Crop);
+        Assert.Equal("N/A", row.GranaryUtilization);
+        Assert.Contains("W N/A", row.WarehouseUtilization);
+        Assert.Contains("C N/A", row.WarehouseUtilization);
     }
 
     [Fact]
-    public void ComparisonDoesNotInventChangeWhenPreviousSampleIsMissing()
+    public void FlagsOverCapacityAndKeepsTheObservedStock()
     {
-        var overview = VillageResourceCalculator.Create(
-            new VillageSnapshot("New village", 10, 20, 30, 40, 100, 100, DateTimeOffset.UtcNow));
+        var overview = Create("Full", 1200, 0, 0, 900, 1000, 800);
+
+        var row = Assert.Single(VillageComparisonBuilder.Create([overview]));
+
+        Assert.Contains("1,200", row.Wood);
+        Assert.Contains("120.0% (over)", row.WarehouseUtilization);
+        Assert.Equal("100.0% (over)", row.GranaryUtilization);
+    }
+
+    [Fact]
+    public void ShowsUnknownDeltaUntilASecondComparableSampleExists()
+    {
+        var overview = Create("New", 10, 20, 30, 40, 100, 100);
 
         var row = Assert.Single(VillageComparisonBuilder.Create([overview]));
 
         Assert.Contains("Δ —", row.Wood);
+    }
+
+    private static VillageResourceOverview Create(
+        string name, int? wood, int? clay, int? iron, int? crop,
+        int? warehouse, int? granary, IReadOnlyList<ResourceChange>? changes = null)
+    {
+        var captured = DateTimeOffset.UtcNow;
+        var resources = new[]
+        {
+            new ResourceGauge("Wood", wood, warehouse),
+            new ResourceGauge("Clay", clay, warehouse),
+            new ResourceGauge("Iron", iron, warehouse),
+            new ResourceGauge("Crop", crop, granary)
+        };
+        return new VillageResourceOverview(name, captured, resources, changes ?? [], []);
     }
 }
