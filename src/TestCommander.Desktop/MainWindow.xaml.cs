@@ -159,6 +159,74 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void CreateBackup_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new SaveFileDialog
+        {
+            Title = "Back up TestCommander data",
+            Filter = "SQLite database (*.db)|*.db",
+            DefaultExt = ".db",
+            AddExtension = true,
+            FileName = $"TestCommander-backup-{DateTime.Now:yyyyMMdd-HHmmss}.db",
+            OverwritePrompt = true
+        };
+
+        if (dialog.ShowDialog(this) != true) return;
+
+        try
+        {
+            var path = await _database.CreateBackupAsync(dialog.FileName);
+            _viewModel.Status = $"Database backup created: {Path.GetFileName(path)}";
+        }
+        catch (Exception ex)
+        {
+            _viewModel.Status = $"Database backup failed: {ex.Message}";
+        }
+    }
+
+    private async void RestoreBackup_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Select a TestCommander database backup",
+            Filter = "SQLite database (*.db)|*.db|All files (*.*)|*.*",
+            CheckFileExists = true,
+            Multiselect = false
+        };
+
+        if (dialog.ShowDialog(this) != true) return;
+
+        var confirmation = MessageBox.Show(
+            this,
+            "Restoring replaces the current TestCommander history and settings. " +
+            "A separate safety backup of the current database will be created automatically first. Continue?",
+            "Confirm database restore",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
+        if (confirmation != MessageBoxResult.Yes) return;
+
+        var core = Browser.CoreWebView2;
+        if (core is not null)
+            await _monitor.DetachAndWaitAsync(core);
+
+        try
+        {
+            var safetyBackup = await _database.RestoreBackupAsync(dialog.FileName);
+            await _viewModel.ReloadAfterDatabaseRestoreAsync();
+            _viewModel.Status = $"Restore completed. Previous data preserved at: {Path.GetFileName(safetyBackup)}";
+        }
+        catch (Exception ex)
+        {
+            _viewModel.Status = $"Restore failed; the current database was not intentionally replaced. {ex.Message}";
+        }
+        finally
+        {
+            if (core is not null)
+                _monitor.Attach(core);
+        }
+    }
+
     private void OnClosed(object? sender, EventArgs e)
     {
         if (Browser.CoreWebView2 is { } core) _monitor.Detach(core);
