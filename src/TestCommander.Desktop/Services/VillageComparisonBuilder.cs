@@ -33,7 +33,7 @@ public static class VillageComparisonBuilder
         var capacity = gauge.Capacity is > 0 ? gauge.Capacity.Value.ToString("N0") : "cap —";
         var utilization = gauge.HasCapacity ? $"{gauge.UtilizationPercent:0}%" : "—";
         var change = overview.Changes.FirstOrDefault(item =>
-            string.Equals(item.ResourceName, name, StringComparison.OrdinalIgnoreCase));
+            string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase));
         var delta = change is null ? "Δ —" : $"Δ {change.Delta:+#,0;-#,0;0}";
         return $"{stock} / {capacity} · {utilization} · {delta}";
     }
