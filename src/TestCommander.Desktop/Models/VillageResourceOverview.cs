@@ -4,7 +4,8 @@ public sealed record VillageResourceOverview(
     string VillageName,
     DateTimeOffset CapturedAt,
     IReadOnlyList<ResourceGauge> Resources,
-    IReadOnlyList<ResourceChange> Changes)
+    IReadOnlyList<ResourceChange> Changes,
+    IReadOnlyList<ResourceTrend> Trends)
 {
     public string CapturedAtLabel => $"Captured {CapturedAt.ToLocalTime():g}";
 

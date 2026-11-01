@@ -1,5 +1,7 @@
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Controls;
+using TestCommander.Models;
 using Microsoft.Web.WebView2.Core;
 using TestCommander.Services;
 using TestCommander.ViewModels;
@@ -12,6 +14,7 @@ public partial class MainWindow : Window
     private readonly PassiveResponseMonitor _monitor;
     private readonly MainViewModel _viewModel;
     private bool _initialized;
+    private bool _retentionReady;
 
     public MainWindow()
     {
@@ -45,6 +48,8 @@ public partial class MainWindow : Window
             _monitor.Attach(Browser.CoreWebView2);
             UpdateAllowedOrigin();
             await _viewModel.RefreshAsync();
+            _retentionReady = true;
+            RetentionSelector.SelectedItem = _viewModel.SelectedRetentionOption;
             NavigateToAddress();
         }
         catch (Exception ex)
@@ -111,6 +116,19 @@ public partial class MainWindow : Window
     private void AddressBox_KeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter) NavigateToAddress();
+    }
+
+    private async void Retention_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_retentionReady || RetentionSelector.SelectedItem is not RetentionOption option) return;
+        try
+        {
+            await _viewModel.SetSnapshotRetentionAsync(option.Days);
+        }
+        catch (Exception ex)
+        {
+            _viewModel.Status = $"Could not update snapshot retention: {ex.Message}";
+        }
     }
 
     private void OnClosed(object? sender, EventArgs e)

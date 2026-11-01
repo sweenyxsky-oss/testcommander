@@ -101,6 +101,23 @@ public sealed class VillageResourceCalculatorTests
     }
 
     [Fact]
+    public void IncludesTrendSeriesFromTheSuppliedSnapshotHistory()
+    {
+        var history = new[]
+        {
+            new VillageSnapshot("Test village", 100, 200, 300, 400, 1000, 1000, DateTimeOffset.UtcNow.AddMinutes(-2)),
+            new VillageSnapshot("Test village", 150, 250, 350, 450, 1000, 1000, DateTimeOffset.UtcNow.AddMinutes(-1)),
+            new VillageSnapshot("Test village", 200, 300, 400, 500, 1000, 1000, DateTimeOffset.UtcNow)
+        };
+
+        var result = VillageResourceCalculator.Create(history[^1], history[^2], history);
+
+        Assert.Equal(4, result.Trends.Count);
+        Assert.Equal(3, result.Trends[0].SampleCount);
+        Assert.Contains("Δ +100", result.Trends[0].ChangeLabel);
+    }
+
+    [Fact]
     public void DoesNotCompareSnapshotsFromDifferentVillages()
     {
         var previous = new VillageSnapshot("Village A", 100, 200, 300, 400, 1000, 800, DateTimeOffset.UtcNow);
