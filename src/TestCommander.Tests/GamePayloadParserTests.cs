@@ -96,6 +96,15 @@ public sealed class GamePayloadParserTests
         Assert.ThrowsAny<JsonException>(() => GamePayloadParser.Parse("{invalid"));
 
     [Fact]
+    public void AcceptsUtf8BomAtStartOfJsonText()
+    {
+        const string json = "\uFEFF{\"resources\":{\"wood\":1,\"clay\":2,\"iron\":3}}";
+        var result = GamePayloadParser.Parse(json);
+        Assert.NotNull(result.Resources);
+        Assert.Equal(1, result.Resources.Wood);
+    }
+
+    [Fact]
     public void NullInputThrowsArgumentNullException() =>
         Assert.Throws<ArgumentNullException>(() => GamePayloadParser.Parse(null!));
 }

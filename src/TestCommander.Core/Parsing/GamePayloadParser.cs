@@ -22,6 +22,7 @@ public static class GamePayloadParser
     public static ParsedGameData Parse(string json)
     {
         ArgumentNullException.ThrowIfNull(json);
+        if (json.Length > 0 && json[0] == '\uFEFF') json = json[1..];
         using var document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 48 });
         var root = document.RootElement;
         var villageName = FindDirectString(root, "villagename", "village_name") ?? "Current village";
