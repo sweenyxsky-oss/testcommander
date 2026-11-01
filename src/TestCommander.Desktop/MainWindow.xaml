@@ -46,8 +46,8 @@
               <DockPanel LastChildFill="False">
                 <TextBlock Text="VILLAGE RESOURCE MONITOR" Foreground="#D6A65F" FontWeight="SemiBold" FontSize="11" VerticalAlignment="Center"/>
                 <ComboBox x:Name="RetentionSelector" DockPanel.Dock="Right" Width="88" Margin="6,0,0,0"
-                          ItemsSource="{Binding RetentionOptions}" DisplayMemberPath="Label" SelectedValuePath="Days"
-                          SelectedValue="{Binding SelectedRetentionDays, Mode=OneWay}"
+                          ItemsSource="{Binding RetentionOptions}" DisplayMemberPath="Label"
+                          SelectedItem="{Binding SelectedRetentionOption, Mode=OneWay}"
                           SelectionChanged="Retention_SelectionChanged"/>
               </DockPanel>
               <TextBlock Text="{Binding ResourceSummary}" Margin="0,5,0,7" Foreground="#A9B7C2" FontSize="11"/>
