@@ -255,7 +255,13 @@ public sealed class DatabaseService
                     : int.TryParse(stored, out var days) && days > 0 ? days : 180;
         }
 
-        await SetSnapshotRetentionDaysAsync(180, cancellationToken);
+        await using var initialize = connection.CreateCommand();
+        initialize.CommandText = """
+            INSERT INTO app_settings(setting_key,setting_value)
+            VALUES('snapshot_retention_days','180')
+            ON CONFLICT(setting_key) DO NOTHING
+            """;
+        await initialize.ExecuteNonQueryAsync(cancellationToken);
         return 180;
     }
 
