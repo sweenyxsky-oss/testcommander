@@ -177,6 +177,34 @@ public sealed class DatabaseService
         return results;
     }
 
+    public Task<IReadOnlyList<string>> GetRecentQueueSummariesAsync(CancellationToken cancellationToken = default) =>
+        QueryStringsAsync("""
+            SELECT queue_type || ': ' || item_name ||
+                CASE WHEN level IS NOT NULL THEN ' (Lv ' || level || ')' ELSE '' END ||
+                CASE WHEN completes_at IS NOT NULL THEN ' • ' || completes_at ELSE '' END
+            FROM queue_observations ORDER BY id DESC LIMIT 4
+            """, cancellationToken);
+
+    public Task<IReadOnlyList<string>> GetRecentMovementSummariesAsync(CancellationToken cancellationToken = default) =>
+        QueryStringsAsync("""
+            SELECT movement_type || ': ' || COALESCE(NULLIF(origin, ''), '?') || ' → ' ||
+                COALESCE(NULLIF(destination, ''), '?') ||
+                CASE WHEN arrives_at IS NOT NULL THEN ' • ' || arrives_at ELSE '' END
+            FROM troop_movement_observations ORDER BY id DESC LIMIT 4
+            """, cancellationToken);
+
+    private async Task<IReadOnlyList<string>> QueryStringsAsync(string sql, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        var results = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            if (!reader.IsDBNull(0)) results.Add(reader.GetString(0));
+        return results;
+    }
+
     private static int? ReadNullableInt(SqliteDataReader reader, int index) => reader.IsDBNull(index) ? null : reader.GetInt32(index);
     private static void AddNullable(SqliteCommand command, string name, int? value) =>
         command.Parameters.AddWithValue(name, value is null ? DBNull.Value : value.Value);
