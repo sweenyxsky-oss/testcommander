@@ -18,6 +18,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public ObservableCollection<CapturedResponse> RecentResponses { get; } = [];
     public ObservableCollection<VillageResourceOverview> ResourceOverviews { get; } = [];
+    public ObservableCollection<VillageComparisonRow> VillageComparisons { get; } = [];
     public ObservableCollection<RetentionOption> RetentionOptions { get; } =
     [
         new(30, "30 days"),
@@ -52,6 +53,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             RecentResponses.Add(response);
 
         ResourceOverviews.Clear();
+        VillageComparisons.Clear();
         var latestSnapshots = await _database.GetLatestSnapshotsAsync();
         foreach (var latest in latestSnapshots)
         {
@@ -60,6 +62,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
             var previous = history.Count > 1 ? history[^2] : null;
             ResourceOverviews.Add(VillageResourceCalculator.Create(current, previous, history));
         }
+
+        foreach (var comparison in VillageComparisonBuilder.Create(ResourceOverviews))
+            VillageComparisons.Add(comparison);
 
         ResourceSummary = ResourceOverviews.Count == 0
             ? "No village data captured yet"
