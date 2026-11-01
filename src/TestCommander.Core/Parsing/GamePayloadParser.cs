@@ -131,7 +131,7 @@ public static class GamePayloadParser
             .Replace('_', ' ').Trim();
         if (spaced.Length == 0) return "Observed";
         var words = spaced.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        return string.Join(' ', words.Select(word => char.ToUpperInvariant(word[0]) + word[1..].ToLowerInvariant()));
+        return string.Join(" ", words.Select(word => char.ToUpperInvariant(word[0]) + word[1..].ToLowerInvariant()));
     }
 
     private static string? FindDirectString(JsonElement root, params string[] names)
@@ -172,13 +172,16 @@ public static class GamePayloadParser
         foreach (var property in element.EnumerateObject())
         {
             if (!accepted.Contains(Normalize(property.Name))) continue;
-            int parsed;
-            var valid = property.Value.ValueKind == JsonValueKind.Number
-                ? property.Value.TryGetInt32(out parsed)
-                : property.Value.ValueKind == JsonValueKind.String &&
-                  int.TryParse(property.Value.GetString(), NumberStyles.Integer | NumberStyles.AllowThousands,
-                      CultureInfo.InvariantCulture, out parsed);
-            if (valid && parsed >= 0) return parsed;
+            int? parsed = null;
+            if (property.Value.ValueKind == JsonValueKind.Number &&
+                property.Value.TryGetInt32(out var numericValue))
+                parsed = numericValue;
+            else if (property.Value.ValueKind == JsonValueKind.String &&
+                int.TryParse(property.Value.GetString(), NumberStyles.Integer | NumberStyles.AllowThousands,
+                    CultureInfo.InvariantCulture, out var stringValue))
+                parsed = stringValue;
+
+            if (parsed is >= 0) return parsed;
         }
         return null;
     }
