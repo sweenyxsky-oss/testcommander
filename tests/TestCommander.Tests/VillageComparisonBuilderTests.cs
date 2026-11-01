@@ -19,7 +19,7 @@ public sealed class VillageComparisonBuilderTests
         Assert.Contains("150", rows[0].Wood);
         Assert.Contains("Δ +50", rows[0].Wood);
         Assert.Contains("Δ -25", rows[0].Clay);
-        Assert.Contains("15.0%", rows[0].GranaryUtilization);
+        Assert.Equal("50.0%", rows[0].GranaryUtilization);
         Assert.Contains("W 15.0%", rows[0].WarehouseUtilization);
     }
 
@@ -46,7 +46,7 @@ public sealed class VillageComparisonBuilderTests
 
         Assert.Contains("1,200", row.Wood);
         Assert.Contains("120.0% (over)", row.WarehouseUtilization);
-        Assert.Equal("100.0% (over)", row.GranaryUtilization);
+        Assert.Equal("112.5% (over)", row.GranaryUtilization);
     }
 
     [Fact]
