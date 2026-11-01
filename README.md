@@ -1,50 +1,62 @@
 # TestCommander
 
-A Windows-first Travian companion desktop app. This project is an independent community tool and is not affiliated with or endorsed by Travian Games.
+A Windows desktop companion for Travian built with C#, WPF and Microsoft Edge WebView2.
 
-## Stack
-- Electron desktop shell
-- React + TypeScript renderer
-- SQLite database stored in the current Windows user's application data folder
-- Secure IPC bridge (renderer has no direct Node.js access)
+## Current scope
+
+- Embedded, visible WebView2 browser with a persistent browser profile.
+- Passive observation of successful JSON responses from the currently displayed origin.
+- Local SQLite storage for response metadata and cautiously extracted resource snapshots.
+- A small activity view and village snapshot overview.
+- TestCommander does not copy passwords or authentication headers into its own database. WebView2 retains the normal signed-in browser session in its separate local profile.
+
+**This is a read-only companion.** It does not submit game actions, replay requests, automate clicks, randomize interaction timing, or attempt to evade game rules or bot detection. Any in-game action remains a manual action by the user.
 
 ## Requirements
-- Windows 10/11 (64-bit)
-- Node.js 22 LTS or newer
-- npm
 
-## Run in development
+- Windows 10/11 x64.
+- .NET 10 SDK (WPF target: `net10.0-windows`).
+- Visual Studio 2026 with the .NET desktop development workload, or the .NET SDK.
+
+## Build and run
+
+From the repository root:
+
 ```powershell
-npm install
-npm run dev
+dotnet restore .\TestCommander.sln
+dotnet build .\TestCommander.sln -c Release
+dotnet run --project .\src\TestCommander.Desktop\TestCommander.Desktop.csproj
 ```
 
-## Build a Windows installer
-```powershell
-npm run dist:win
-```
-The NSIS installer is written to `release/`. The application database is kept separately in Electron's `userData` folder, so reinstalling an update does not overwrite it.
+The first run requires the Microsoft Edge WebView2 Runtime. It is preinstalled on most Windows 10/11 machines; otherwise install the Evergreen WebView2 Runtime.
 
-## Initial features
-- Local dashboard
-- Create and view Travian accounts
-- Create and view villages linked to accounts
-- SQLite persistence
-- No Docker, PostgreSQL, Python, or hosted service required
+## Local data
 
-## Data and security
-All data is stored locally on the Windows machine. The renderer uses a restricted preload bridge and does not receive direct filesystem or database access. Do not store your Travian password in this app. Account records currently store a label and server address only.
+Data is stored under:
+
+`%LOCALAPPDATA%\TestCommander\`
+
+- `BrowserProfile\` — persistent WebView2 profile and signed-in session data.
+- `testcommander.db` — SQLite response metadata and extracted snapshots.
+
+The application deliberately does not persist response bodies, cookies, authorization headers, or request payloads. Treat the browser profile as sensitive because it contains your normal signed-in web session.
+
+## Monitoring limitations
+
+Travian's response formats can vary by game world, language, and release. The initial parser is heuristic and intentionally conservative: it only recognizes common resource field names in JSON. It does not yet understand every village, queue, troop movement, or attack format. The parser may need to be adapted using sanitized sample payloads; keep all future parsing read-only.
+
+Only JSON responses from the exact origin currently displayed in the browser are inspected. HTTPS is required for remote sites; HTTP is permitted only for loopback development addresses. Response bodies are limited to 1 MB and are held in memory only long enough to parse.
 
 ## Project layout
-- `src/main` — Electron main process and SQLite access
-- `src/preload` — typed, restricted IPC bridge
-- `src/renderer` — React user interface
 
-## Roadmap
-1. Improve account and village editing/deletion
-2. Add village resource and troop tracking
-3. Add build queue and production planning
-4. Add map, distance, and travel-time tools
-5. Add import/export and scheduled reminders
+- `src/TestCommander.Desktop/` — WPF desktop app.
+- `Models/` — local models for observed data.
+- `Services/` — SQLite persistence and passive WebView2 response monitoring.
+- `ViewModels/` — UI state.
 
-The initial version is a local organizer and planning foundation. It does not automate gameplay or interact with Travian servers.
+## Security notes
+
+- The app never reads or exports browser cookies or authentication headers.
+- It does not store raw response bodies or request payloads.
+- Browser session data remains in the WebView2 profile under the current Windows user.
+- The application contains no gameplay action dispatcher or automation subsystem.
