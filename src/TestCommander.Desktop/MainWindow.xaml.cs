@@ -14,6 +14,7 @@ public partial class MainWindow : Window
     private readonly PassiveResponseMonitor _monitor;
     private readonly MainViewModel _viewModel;
     private bool _initialized;
+    private bool _retentionReady;
 
     public MainWindow()
     {
@@ -47,6 +48,8 @@ public partial class MainWindow : Window
             _monitor.Attach(Browser.CoreWebView2);
             UpdateAllowedOrigin();
             await _viewModel.RefreshAsync();
+            _retentionReady = true;
+            RetentionSelector.SelectedItem = _viewModel.SelectedRetentionOption;
             NavigateToAddress();
         }
         catch (Exception ex)
@@ -117,7 +120,7 @@ public partial class MainWindow : Window
 
     private async void Retention_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (!_initialized || RetentionSelector.SelectedItem is not RetentionOption option) return;
+        if (!_retentionReady || RetentionSelector.SelectedItem is not RetentionOption option) return;
         try
         {
             await _viewModel.SetSnapshotRetentionAsync(option.Days);
