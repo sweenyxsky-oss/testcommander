@@ -7,4 +7,6 @@ public sealed record VillageComparisonRow(
     string Clay,
     string Iron,
     string Crop,
-    DateTimeOffset CapturedAt);
+    string WarehouseUtilization,
+    string GranaryUtilization,
+    string CapturedAt);
