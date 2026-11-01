@@ -60,7 +60,7 @@ public sealed class DatabaseBackupRestoreTests
         await service.SaveSnapshotAsync(Snapshot("Keep this village", 777));
         await File.WriteAllTextAsync(files.BackupPath, "not a SQLite database");
 
-        await Assert.ThrowsAsync<Exception>(() => service.RestoreBackupAsync(files.BackupPath));
+        await Assert.ThrowsAnyAsync<Exception>(() => service.RestoreBackupAsync(files.BackupPath));
 
         var retained = Assert.Single(await service.GetRecentSnapshotsAsync("Keep this village"));
         Assert.Equal(777, retained.Wood);
