@@ -61,6 +61,7 @@ Only successful JSON responses from the exact origin currently displayed in the 
 - The app never reads or exports browser cookies or authentication headers.
 - It does not store raw response bodies or request payloads.
 - Browser session data remains in the WebView2 profile under the current Windows user.
+- WebView2 password autosave and general autofill are disabled; the normal signed-in site session can still persist through browser cookies in that profile.
 - The application contains no gameplay action dispatcher or automation subsystem.
 - Numeric identifiers in stored response paths are redacted where recognizable; response summaries contain only extraction counts.
 - Local SQLite data can be cleared from the dashboard without deleting the browser profile.
