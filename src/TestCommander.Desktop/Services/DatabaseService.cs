@@ -21,7 +21,7 @@ public sealed class DatabaseService
         }
         else
         {
-            databasePath = Path.GetFullPath(databasePath);
+            databasePath = Path.GetFullPath(databasePath!);
             Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
         }
 
