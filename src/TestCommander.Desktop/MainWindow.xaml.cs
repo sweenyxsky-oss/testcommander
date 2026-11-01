@@ -96,7 +96,7 @@ public partial class MainWindow : Window
     private async void ClearData_Click(object sender, RoutedEventArgs e)
     {
         var answer = MessageBox.Show(
-            "Delete all locally collected response metadata, village snapshots, queue observations, and troop movement observations?\\n\\nYour browser profile and signed-in session will not be deleted.",
+            "Delete all locally collected response metadata, village snapshots, queue observations, and troop movement observations?\n\nYour browser profile and signed-in session will not be deleted.",
             "Clear local monitoring data",
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning);
