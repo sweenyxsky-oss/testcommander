@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.IO;
+using System.Text;
 using Microsoft.Data.Sqlite;
 using TestCommander.Models;
 
@@ -266,6 +268,64 @@ public sealed class DatabaseService
         command.CommandText = "DELETE FROM village_snapshots WHERE captured_at < $cutoff";
         command.Parameters.AddWithValue("$cutoff", cutoff);
         return await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task ExportSnapshotsCsvAsync(Stream destination, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        if (!destination.CanWrite)
+            throw new ArgumentException("The destination stream must be writable.", nameof(destination));
+
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT village_name,wood,clay,iron,crop,warehouse_capacity,granary_capacity,captured_at
+            FROM village_snapshots
+            ORDER BY village_name,captured_at,id
+            """;
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using var writer = new StreamWriter(
+            destination, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true), 4096, leaveOpen: true);
+
+        await writer.WriteLineAsync("VillageName,CapturedAtUtc,Wood,Clay,Iron,Crop,WarehouseCapacity,GranaryCapacity");
+
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var fields = new string?[]
+            {
+                EscapeCsv(reader.GetString(0), protectFormula: true),
+                EscapeCsv(reader.GetString(7)),
+                EscapeCsv(ReadNullableInt(reader, 1)?.ToString(CultureInfo.InvariantCulture)),
+                EscapeCsv(ReadNullableInt(reader, 2)?.ToString(CultureInfo.InvariantCulture)),
+                EscapeCsv(ReadNullableInt(reader, 3)?.ToString(CultureInfo.InvariantCulture)),
+                EscapeCsv(ReadNullableInt(reader, 4)?.ToString(CultureInfo.InvariantCulture)),
+                EscapeCsv(ReadNullableInt(reader, 5)?.ToString(CultureInfo.InvariantCulture)),
+                EscapeCsv(ReadNullableInt(reader, 6)?.ToString(CultureInfo.InvariantCulture))
+            };
+            await writer.WriteLineAsync(string.Join(",", fields));
+        }
+
+        await writer.FlushAsync(cancellationToken);
+    }
+
+    private static string EscapeCsv(string? value, bool protectFormula = false)
+    {
+        if (string.IsNullOrEmpty(value)) return string.Empty;
+
+        if (protectFormula)
+        {
+            var firstNonWhitespace = 0;
+            while (firstNonWhitespace < value.Length && char.IsWhiteSpace(value[firstNonWhitespace]))
+                firstNonWhitespace++;
+
+            if (firstNonWhitespace < value.Length &&
+                value[firstNonWhitespace] is '=' or '+' or '-' or '@')
+                value = "'" + value;
+        }
+
+        if (value.IndexOfAny([',', '"', '\r', '\n']) < 0) return value;
+        return "\"" + value.Replace("\"", "\"\"") + "\"";
     }
 
     private static VillageSnapshot ReadSnapshot(SqliteDataReader reader, DateTimeOffset captured) =>
