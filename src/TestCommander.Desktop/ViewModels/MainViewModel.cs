@@ -66,6 +66,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
             : $"{ResourceOverviews.Count} village(s) • trend from up to {HistorySampleLimit} distinct samples • retention: {SelectedRetentionOption.Label}";
     }
 
+    public async Task ReloadAfterDatabaseRestoreAsync()
+    {
+        _retentionInitialized = false;
+        await RefreshAsync();
+    }
+
     public async Task SetSnapshotRetentionAsync(int? days)
     {
         if (!RetentionOptions.Any(option => option.Days == days))
