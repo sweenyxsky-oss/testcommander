@@ -55,6 +55,19 @@
               </DockPanel>
               <TextBlock Text="{Binding ResourceSummary}" Margin="0,5,0,7" Foreground="#A9B7C2" FontSize="11"/>
             </StackPanel>
+            <TextBlock DockPanel.Dock="Top" Text="ALL VILLAGES • COMPARISON" Foreground="#D6A65F" FontWeight="SemiBold" FontSize="9" Margin="0,0,0,5"/>
+            <DataGrid DockPanel.Dock="Top" ItemsSource="{Binding VillageComparisons}" AutoGenerateColumns="False"
+                      Height="112" MinHeight="55" MaxHeight="150" HeadersVisibility="Column"
+                      CanUserSortColumns="True" CanUserResizeColumns="True" CanUserReorderColumns="True"
+                      HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Margin="0,0,0,8">
+              <DataGrid.Columns>
+                <DataGridTextColumn Header="Village" Binding="{Binding VillageName}" Width="1.15*"/>
+                <DataGridTextColumn Header="Wood" Binding="{Binding Wood}" Width="*"/>
+                <DataGridTextColumn Header="Clay" Binding="{Binding Clay}" Width="*"/>
+                <DataGridTextColumn Header="Iron" Binding="{Binding Iron}" Width="*"/>
+                <DataGridTextColumn Header="Crop" Binding="{Binding Crop}" Width="*"/>
+              </DataGrid.Columns>
+            </DataGrid>
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
               <ItemsControl ItemsSource="{Binding ResourceOverviews}">
                 <ItemsControl.ItemTemplate>
