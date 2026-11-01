@@ -93,6 +93,24 @@ public partial class MainWindow : Window
         Browser.CoreWebView2?.Navigate(uri.ToString());
     }
 
+    private async void ClearData_Click(object sender, RoutedEventArgs e)
+    {
+        var answer = MessageBox.Show(
+            "Delete all locally collected response metadata, village snapshots, queue observations, and troop movement observations?\\n\\nYour browser profile and signed-in session will not be deleted.",
+            "Clear local monitoring data",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        if (answer != MessageBoxResult.Yes) return;
+        try
+        {
+            await _viewModel.ClearObservedDataAsync();
+        }
+        catch (Exception ex)
+        {
+            _viewModel.Status = $"Could not clear local data: {ex.Message}";
+        }
+    }
+
     private void Navigate_Click(object sender, RoutedEventArgs e) => NavigateToAddress();
 
     private async void Refresh_Click(object sender, RoutedEventArgs e)
