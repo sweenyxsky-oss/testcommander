@@ -80,7 +80,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         await RefreshAsync();
         Status = removed > 0
             ? $"Snapshot retention updated. Removed {removed:N0} expired sample(s)."
-            : $"Snapshot retention updated: {RetentionLabel(days)}.";
+            : $"Snapshot retention updated: {SelectedRetentionOption.Label}.";
     }
 
     private void Set<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
