@@ -1,4 +1,5 @@
 using TestCommander.Core.Parsing;
+using Xunit;
 
 namespace TestCommander.Tests;
 
@@ -10,9 +11,7 @@ public sealed class GamePayloadParserTests
         const string json = """
             {"villageName":"Capital","resources":{"wood":1200,"clay":"900","iron":750,"crop":600,"warehouseCapacity":5000,"granaryCapacity":4000}}
             """;
-
         var result = GamePayloadParser.Parse(json);
-
         Assert.NotNull(result.Resources);
         Assert.Equal("Capital", result.Resources.VillageName);
         Assert.Equal(1200, result.Resources.Wood);
@@ -27,8 +26,24 @@ public sealed class GamePayloadParserTests
     public void DoesNotMistakeUnrelatedNestedNumbersForResources()
     {
         const string json = """{"player":{"wood":100},"statistics":{"clay":200},"inventory":{"iron":300}}""";
+        Assert.Null(GamePayloadParser.Parse(json).Resources);
+    }
+
+    [Fact]
+    public void DoesNotTreatInventoryAsResourceSnapshot()
+    {
+        const string json = """{"inventory":{"wood":100,"clay":200,"iron":300}}""";
+        Assert.Null(GamePayloadParser.Parse(json).Resources);
+    }
+
+    [Fact]
+    public void ParsesRootResourceFieldsWhenAtLeastThreeArePresent()
+    {
+        const string json = """{"villageName":"Capital","wood":1,"clay":2,"iron":3}""";
         var result = GamePayloadParser.Parse(json);
-        Assert.Null(result.Resources);
+        Assert.NotNull(result.Resources);
+        Assert.Equal(1, result.Resources.Wood);
+        Assert.Equal(3, result.Resources.Iron);
     }
 
     [Fact]
@@ -38,9 +53,7 @@ public sealed class GamePayloadParserTests
             {"buildingQueue":[{"buildingName":"Granary","level":12,"completesAt":"2026-11-01T20:00:00Z"}],
              "training_queue":[{"unitName":"Legionnaire","completionTime":"2026-11-01T21:00:00Z"}]}
             """;
-
         var result = GamePayloadParser.Parse(json);
-
         Assert.Equal(2, result.Queues.Count);
         Assert.Contains(result.Queues, x => x.ItemName == "Granary" && x.Level == 12);
         Assert.Contains(result.Queues, x => x.ItemName == "Legionnaire");
@@ -52,9 +65,7 @@ public sealed class GamePayloadParserTests
         const string json = """
             {"incomingAttacks":[{"origin":"Enemy village","destination":"Capital","type":"Attack","arrivalTime":1793563200}]}
             """;
-
         var result = GamePayloadParser.Parse(json);
-
         var movement = Assert.Single(result.TroopMovements);
         Assert.Equal("Enemy village", movement.Origin);
         Assert.Equal("Capital", movement.Destination);
@@ -63,8 +74,14 @@ public sealed class GamePayloadParserTests
     }
 
     [Fact]
-    public void InvalidJsonThrowsJsonException()
+    public void ParsesMillisecondUnixArrival()
     {
-        Assert.Throws<System.Text.Json.JsonException>(() => GamePayloadParser.Parse("{invalid"));
+        const string json = """{"troopMovements":[{"from":"A","to":"B","arrivalTime":1793563200000}]}""";
+        var movement = Assert.Single(GamePayloadParser.Parse(json).TroopMovements);
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(1793563200000), movement.ArrivesAt);
     }
+
+    [Fact]
+    public void InvalidJsonThrowsJsonException() =>
+        Assert.Throws<System.Text.Json.JsonException>(() => GamePayloadParser.Parse("{invalid"));
 }

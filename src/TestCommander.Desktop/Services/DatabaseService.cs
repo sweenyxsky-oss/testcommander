@@ -34,11 +34,11 @@ public sealed class DatabaseService
 
     private async Task EnsureSchemaAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
-        if (_initialized) return;
+        if (Volatile.Read(ref _initialized)) return;
         await _initializationGate.WaitAsync(cancellationToken);
         try
         {
-            if (_initialized) return;
+            if (Volatile.Read(ref _initialized)) return;
             await using var command = connection.CreateCommand();
             command.CommandText = """
                 PRAGMA journal_mode=WAL;
@@ -63,7 +63,7 @@ public sealed class DatabaseService
                 CREATE INDEX IF NOT EXISTS ix_movement_time ON troop_movement_observations(observed_at DESC);
                 """;
             await command.ExecuteNonQueryAsync(cancellationToken);
-            _initialized = true;
+            Volatile.Write(ref _initialized, true);
         }
         finally { _initializationGate.Release(); }
     }
@@ -72,7 +72,11 @@ public sealed class DatabaseService
     {
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
-        command.CommandText = "INSERT INTO captured_responses(url_path,content_type,status_code,body_bytes,captured_at,summary) VALUES($url,$type,$status,$bytes,$at,$summary)";
+        command.CommandText = """
+            INSERT INTO captured_responses(url_path,content_type,status_code,body_bytes,captured_at,summary)
+            VALUES($url,$type,$status,$bytes,$at,$summary);
+            DELETE FROM captured_responses WHERE id NOT IN (SELECT id FROM captured_responses ORDER BY id DESC LIMIT 2000);
+            """;
         command.Parameters.AddWithValue("$url", item.UrlPath);
         command.Parameters.AddWithValue("$type", item.ContentType);
         command.Parameters.AddWithValue("$status", item.StatusCode);
@@ -88,7 +92,8 @@ public sealed class DatabaseService
         await using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO village_snapshots(village_name,wood,clay,iron,crop,warehouse_capacity,granary_capacity,captured_at)
-            VALUES($name,$wood,$clay,$iron,$crop,$warehouse,$granary,$at)
+            VALUES($name,$wood,$clay,$iron,$crop,$warehouse,$granary,$at);
+            DELETE FROM village_snapshots WHERE id NOT IN (SELECT id FROM village_snapshots ORDER BY id DESC LIMIT 10000);
             """;
         command.Parameters.AddWithValue("$name", item.VillageName);
         AddNullable(command, "$wood", item.Wood); AddNullable(command, "$clay", item.Clay);
@@ -130,6 +135,13 @@ public sealed class DatabaseService
             command.Parameters.AddWithValue("$observed", observedAt.ToString("O"));
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
+        await using var trim = connection.CreateCommand();
+        trim.Transaction = (SqliteTransaction)transaction;
+        trim.CommandText = """
+            DELETE FROM queue_observations WHERE id NOT IN (SELECT id FROM queue_observations ORDER BY id DESC LIMIT 2000);
+            DELETE FROM troop_movement_observations WHERE id NOT IN (SELECT id FROM troop_movement_observations ORDER BY id DESC LIMIT 2000);
+            """;
+        await trim.ExecuteNonQueryAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 
