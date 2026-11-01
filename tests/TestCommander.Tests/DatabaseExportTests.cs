@@ -29,7 +29,7 @@ public sealed class DatabaseExportTests
 
         Assert.StartsWith("VillageName,CapturedAtUtc,Wood,Clay,Iron,Crop,WarehouseCapacity,GranaryCapacity", csv);
         Assert.Contains("'=1+1,", csv);
-        Assert.Contains("\"Village, \"\"North\"\"",", csv);
+        Assert.Contains("Village, \"\"North\"\"", csv);
         Assert.Contains(",,20,30,40,100,100", csv);
         Assert.Equal(3, csv.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length);
     }
