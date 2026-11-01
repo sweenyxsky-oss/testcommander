@@ -47,7 +47,7 @@ public sealed class GamePayloadParserTests
     }
 
     [Fact]
-    public void ParsesBuildingAndTrainingQueues()
+    public void ParsesBuildingAndTrainingQueuesWithQueueLabels()
     {
         const string json = """
             {"buildingQueue":[{"buildingName":"Granary","level":12,"completesAt":"2026-11-01T20:00:00Z"}],
@@ -55,22 +55,21 @@ public sealed class GamePayloadParserTests
             """;
         var result = GamePayloadParser.Parse(json);
         Assert.Equal(2, result.Queues.Count);
-        Assert.Contains(result.Queues, x => x.ItemName == "Granary" && x.Level == 12);
-        Assert.Contains(result.Queues, x => x.ItemName == "Legionnaire");
+        Assert.Contains(result.Queues, x => x.ItemName == "Granary" && x.Level == 12 && x.QueueType == "Building Queue");
+        Assert.Contains(result.Queues, x => x.ItemName == "Legionnaire" && x.QueueType == "Training queue");
     }
 
     [Fact]
-    public void ParsesIncomingMovementAndUnixArrival()
+    public void ParsesIncomingAndOutgoingTroopMovements()
     {
         const string json = """
-            {"incomingAttacks":[{"origin":"Enemy village","destination":"Capital","type":"Attack","arrivalTime":1793563200}]}
+            {"incomingAttacks":[{"origin":"Enemy village","destination":"Capital","type":"Attack","arrivalTime":1793563200}],
+             "outgoingAttacks":[{"from":"Capital","to":"Target","description":"Raid","arrivalTime":1793563200000}]}
             """;
         var result = GamePayloadParser.Parse(json);
-        var movement = Assert.Single(result.TroopMovements);
-        Assert.Equal("Enemy village", movement.Origin);
-        Assert.Equal("Capital", movement.Destination);
-        Assert.Equal("Attack", movement.MovementType);
-        Assert.NotNull(movement.ArrivesAt);
+        Assert.Equal(2, result.TroopMovements.Count);
+        Assert.Contains(result.TroopMovements, x => x.Origin == "Enemy village" && x.Destination == "Capital" && x.MovementType == "Attack");
+        Assert.Contains(result.TroopMovements, x => x.Origin == "Capital" && x.Destination == "Target" && x.MovementType == "Outgoing Attacks");
     }
 
     [Fact]
