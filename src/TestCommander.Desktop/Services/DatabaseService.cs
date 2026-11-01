@@ -209,3 +209,20 @@ public sealed class DatabaseService
     private static void AddNullable(SqliteCommand command, string name, int? value) =>
         command.Parameters.AddWithValue(name, value is null ? DBNull.Value : value.Value);
 }
+
+    public async Task ClearObservedDataAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.Transaction = (SqliteTransaction)transaction;
+        command.CommandText = """
+            DELETE FROM captured_responses;
+            DELETE FROM village_snapshots;
+            DELETE FROM queue_observations;
+            DELETE FROM troop_movement_observations;
+            """;
+        await command.ExecuteNonQueryAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+}
