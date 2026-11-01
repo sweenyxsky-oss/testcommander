@@ -67,6 +67,10 @@ public sealed class DatabaseService
                     warehouse_capacity INTEGER NULL, granary_capacity INTEGER NULL,
                     captured_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    setting_key TEXT PRIMARY KEY,
+                    setting_value TEXT NOT NULL
+                );
                 CREATE INDEX IF NOT EXISTS ix_response_time ON captured_responses(captured_at DESC);
                 CREATE INDEX IF NOT EXISTS ix_snapshot_village_time ON village_snapshots(village_name, captured_at DESC);
                 """;
@@ -132,7 +136,7 @@ public sealed class DatabaseService
             AddNullable(insert, "$crop", item.Crop);
             AddNullable(insert, "$warehouse", item.WarehouseCapacity);
             AddNullable(insert, "$granary", item.GranaryCapacity);
-            insert.Parameters.AddWithValue("$at", item.CapturedAt.ToString("O"));
+            insert.Parameters.AddWithValue("$at", item.CapturedAt.ToUniversalTime().ToString("O"));
             await insert.ExecuteNonQueryAsync(cancellationToken);
             return true;
         }
@@ -203,6 +207,53 @@ public sealed class DatabaseService
         }
         results.Reverse();
         return results;
+    }
+
+    public async Task<int?> GetSnapshotRetentionDaysAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using (var read = connection.CreateCommand())
+        {
+            read.CommandText = "SELECT setting_value FROM app_settings WHERE setting_key='snapshot_retention_days' LIMIT 1";
+            var value = await read.ExecuteScalarAsync(cancellationToken);
+            if (value is string stored)
+                return string.Equals(stored, "never", StringComparison.OrdinalIgnoreCase)
+                    ? null
+                    : int.TryParse(stored, out var days) && days > 0 ? days : 180;
+        }
+
+        await SetSnapshotRetentionDaysAsync(180, cancellationToken);
+        return 180;
+    }
+
+    public async Task SetSnapshotRetentionDaysAsync(int? days, CancellationToken cancellationToken = default)
+    {
+        if (days is <= 0 or > 3650)
+            throw new ArgumentOutOfRangeException(nameof(days), "Retention must be between 1 and 3650 days, or null for never.");
+
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO app_settings(setting_key,setting_value)
+            VALUES('snapshot_retention_days',$value)
+            ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value
+            """;
+        command.Parameters.AddWithValue("$value", days?.ToString() ?? "never");
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<int> PruneSnapshotsAsync(int? retentionDays, CancellationToken cancellationToken = default)
+    {
+        if (retentionDays is null) return 0;
+        if (retentionDays <= 0 || retentionDays > 3650)
+            throw new ArgumentOutOfRangeException(nameof(retentionDays));
+
+        var cutoff = DateTimeOffset.UtcNow.AddDays(-retentionDays.Value).ToString("O");
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM village_snapshots WHERE captured_at < $cutoff";
+        command.Parameters.AddWithValue("$cutoff", cutoff);
+        return await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static VillageSnapshot ReadSnapshot(SqliteDataReader reader, DateTimeOffset captured) =>
