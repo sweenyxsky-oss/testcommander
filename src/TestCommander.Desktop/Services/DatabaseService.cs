@@ -114,25 +114,43 @@ public sealed class DatabaseService
         {
             await using var command = connection.CreateCommand();
             command.Transaction = (SqliteTransaction)transaction;
-            command.CommandText = "INSERT INTO queue_observations(queue_type,item_name,level,completes_at,observed_at) VALUES($type,$name,$level,$complete,$observed)";
+            command.CommandText = """
+                INSERT INTO queue_observations(queue_type,item_name,level,completes_at,observed_at)
+                SELECT $type,$name,$level,$complete,$observed
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM queue_observations
+                    WHERE queue_type=$type AND item_name=$name AND level IS $level
+                      AND completes_at IS $complete AND observed_at >= $cutoff
+                )
+                """;
             command.Parameters.AddWithValue("$type", queue.QueueType);
             command.Parameters.AddWithValue("$name", queue.ItemName);
             AddNullable(command, "$level", queue.Level);
             command.Parameters.AddWithValue("$complete", queue.CompletesAt?.ToString("O") is { } complete ? complete : DBNull.Value);
             command.Parameters.AddWithValue("$observed", observedAt.ToString("O"));
+            command.Parameters.AddWithValue("$cutoff", observedAt.AddSeconds(-30).ToString("O"));
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
         foreach (var movement in movements)
         {
             await using var command = connection.CreateCommand();
             command.Transaction = (SqliteTransaction)transaction;
-            command.CommandText = "INSERT INTO troop_movement_observations(movement_type,origin,destination,arrives_at,description,observed_at) VALUES($type,$origin,$destination,$arrival,$description,$observed)";
+            command.CommandText = """
+                INSERT INTO troop_movement_observations(movement_type,origin,destination,arrives_at,description,observed_at)
+                SELECT $type,$origin,$destination,$arrival,$description,$observed
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM troop_movement_observations
+                    WHERE movement_type=$type AND origin=$origin AND destination=$destination
+                      AND arrives_at IS $arrival AND description=$description AND observed_at >= $cutoff
+                )
+                """;
             command.Parameters.AddWithValue("$type", movement.MovementType);
             command.Parameters.AddWithValue("$origin", movement.Origin);
             command.Parameters.AddWithValue("$destination", movement.Destination);
             command.Parameters.AddWithValue("$arrival", movement.ArrivesAt?.ToString("O") is { } arrival ? arrival : DBNull.Value);
             command.Parameters.AddWithValue("$description", movement.Description);
             command.Parameters.AddWithValue("$observed", observedAt.ToString("O"));
+            command.Parameters.AddWithValue("$cutoff", observedAt.AddSeconds(-30).ToString("O"));
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
         await using var trim = connection.CreateCommand();
