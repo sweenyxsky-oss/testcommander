@@ -1,3 +1,4 @@
+using System.IO;
 using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using TestCommander.Models;
@@ -51,12 +52,13 @@ public sealed class PassiveResponseMonitor(DatabaseService database)
                 return;
 
             var response = args.Response;
-            var contentType = response.Headers.GetHeader("Content-Type") ?? string.Empty;
+            var contentType = response.Headers.Contains("Content-Type")
+                ? response.Headers.GetHeader("Content-Type")
+                : string.Empty;
             if (!contentType.Contains("json", StringComparison.OrdinalIgnoreCase)) return;
             if (response.StatusCode is < 200 or >= 300) return;
 
             await using var stream = await response.GetContentAsync();
-            if (stream is null) return;
             using var buffer = new MemoryStream();
             var chunk = new byte[16 * 1024];
             int read;

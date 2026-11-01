@@ -1,3 +1,5 @@
+using System.IO;
+
 namespace TestCommander.Services;
 
 public static class AppPaths
