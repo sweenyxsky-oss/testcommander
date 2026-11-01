@@ -83,21 +83,36 @@ public partial class MainWindow : Window
             _viewModel.Status = "For safety, non-local sites must use HTTPS.";
             return;
         }
+        if (!string.IsNullOrEmpty(uri.UserInfo))
+        {
+            _viewModel.Status = "Remove embedded username/password details from the address.";
+            return;
+        }
         _viewModel.Address = uri.ToString();
         _monitor.SetAllowedOrigin(uri);
         Browser.CoreWebView2?.Navigate(uri.ToString());
     }
 
     private void Navigate_Click(object sender, RoutedEventArgs e) => NavigateToAddress();
-    private void Refresh_Click(object sender, RoutedEventArgs e)
+
+    private async void Refresh_Click(object sender, RoutedEventArgs e)
     {
         Browser.CoreWebView2?.Reload();
-        _ = _viewModel.RefreshAsync();
+        try
+        {
+            await _viewModel.RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            _viewModel.Status = $"Refresh failed: {ex.Message}";
+        }
     }
+
     private void AddressBox_KeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter) NavigateToAddress();
     }
+
     private void OnClosed(object? sender, EventArgs e)
     {
         if (Browser.CoreWebView2 is { } core) _monitor.Detach(core);
