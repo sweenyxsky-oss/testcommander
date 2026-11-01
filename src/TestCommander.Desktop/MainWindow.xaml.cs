@@ -12,7 +12,7 @@ public partial class MainWindow : Window
     private readonly PassiveResponseMonitor _monitor;
     private readonly MainViewModel _viewModel;
     private bool _initialized;
-    private bool _refreshQueued;
+    private int _refreshQueued;
 
     public MainWindow()
     {
@@ -20,7 +20,7 @@ public partial class MainWindow : Window
         _monitor = new PassiveResponseMonitor(_database);
         _viewModel = new MainViewModel(_database);
         DataContext = _viewModel;
-        _monitor.StatusChanged += (_, message) => Dispatcher.InvokeAsync(() => _viewModel.Status = message);
+        _monitor.StatusChanged += (_, message) => SetStatusSafely(message);
         _monitor.DataCaptured += (_, _) => QueueDashboardRefresh();
         Loaded += OnLoaded;
         Closed += OnClosed;
@@ -43,9 +43,13 @@ public partial class MainWindow : Window
             Browser.CoreWebView2.NewWindowRequested += OnNewWindowRequested;
             Browser.CoreWebView2.NavigationCompleted += (_, args) =>
             {
-                _viewModel.Status = args.IsSuccess
-                    ? $"Page loaded: {Browser.Source?.Host}"
-                    : "Navigation did not complete successfully.";
+                if (args.IsSuccess)
+                    SetStatusSafely($"Page loaded: {Browser.Source?.Host}");
+                else
+                {
+                    UpdateAllowedOrigin();
+                    SetStatusSafely("Navigation did not complete successfully.");
+                }
             };
             Browser.CoreWebView2.SourceChanged += (_, _) => UpdateAllowedOrigin();
             _monitor.Attach(Browser.CoreWebView2);
@@ -135,14 +139,27 @@ public partial class MainWindow : Window
 
     private void QueueDashboardRefresh()
     {
-        if (_refreshQueued || Dispatcher.HasShutdownStarted) return;
-        _refreshQueued = true;
-        _ = Dispatcher.InvokeAsync(async () =>
+        if (Dispatcher.HasShutdownStarted || Interlocked.Exchange(ref _refreshQueued, 1) == 1) return;
+        try
         {
-            try { await _viewModel.RefreshAsync(); }
-            catch (Exception ex) { _viewModel.Status = $"Dashboard refresh failed: {ex.GetType().Name}."; }
-            finally { _refreshQueued = false; }
-        });
+            _ = Dispatcher.InvokeAsync(async () =>
+            {
+                try { await _viewModel.RefreshAsync(); }
+                catch (Exception ex) { _viewModel.Status = $"Dashboard refresh failed: {ex.GetType().Name}."; }
+                finally { Interlocked.Exchange(ref _refreshQueued, 0); }
+            });
+        }
+        catch (InvalidOperationException)
+        {
+            Interlocked.Exchange(ref _refreshQueued, 0);
+        }
+    }
+
+    private void SetStatusSafely(string message)
+    {
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+        try { _ = Dispatcher.InvokeAsync(() => _viewModel.Status = message); }
+        catch (InvalidOperationException) { /* Window is closing. */ }
     }
 
     private void OnClosed(object? sender, EventArgs e)

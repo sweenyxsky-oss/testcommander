@@ -6,8 +6,10 @@ A Windows desktop companion for Travian built with C#, WPF and Microsoft Edge We
 
 - Embedded, visible WebView2 browser with a persistent browser profile.
 - Passive observation of successful JSON responses from the currently displayed origin.
-- Local SQLite storage for response metadata and cautiously extracted resource snapshots.
-- A small activity view and village snapshot overview.
+- Local SQLite storage for response metadata, village snapshots, queue observations, and troop-movement observations.
+- Resource, queue, movement, and response activity summaries in the dashboard.
+- Bounded response processing, 1 MB response-body limit, and short-window deduplication to prevent repeated polling responses from filling the database.
+- Response paths are sanitized before storage; query strings, response bodies, cookies, and authorization headers are not retained.
 - TestCommander does not copy passwords or authentication headers into its own database. WebView2 retains the normal signed-in browser session in its separate local profile.
 
 **This is a read-only companion.** It does not submit game actions, replay requests, automate clicks, randomize interaction timing, or attempt to evade game rules or bot detection. Any in-game action remains a manual action by the user.
@@ -45,7 +47,7 @@ The application deliberately does not persist response bodies, cookies, authoriz
 
 Travian's response formats can vary by game world, language, and release. The initial parser is heuristic and intentionally conservative: it only recognizes common resource field names in JSON. It does not yet understand every village, queue, troop movement, or attack format. The parser may need to be adapted using sanitized sample payloads; keep all future parsing read-only.
 
-Only JSON responses from the exact origin currently displayed in the browser are inspected. HTTPS is required for remote sites; HTTP is permitted only for loopback development addresses. Response bodies are limited to 1 MB and are held in memory only long enough to parse.
+Only successful JSON responses from the exact origin currently displayed in the browser are inspected. HTTPS is required for remote sites; HTTP is permitted only for loopback development addresses. Navigation to other schemes and embedded-credential URLs is blocked, and pop-up windows are blocked. Response bodies are limited to 1 MB, at most three are processed concurrently, and they are held in memory only long enough to parse. When processing is saturated, additional responses are skipped rather than queued indefinitely.
 
 ## Project layout
 
@@ -60,3 +62,5 @@ Only JSON responses from the exact origin currently displayed in the browser are
 - It does not store raw response bodies or request payloads.
 - Browser session data remains in the WebView2 profile under the current Windows user.
 - The application contains no gameplay action dispatcher or automation subsystem.
+- Numeric identifiers in stored response paths are redacted where recognizable; response summaries contain only extraction counts.
+- Local SQLite data can be cleared from the dashboard without deleting the browser profile.
