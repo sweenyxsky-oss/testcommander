@@ -40,8 +40,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
         if (!_retentionInitialized)
         {
             var retentionDays = await _database.GetSnapshotRetentionDaysAsync();
-            SelectedRetentionOption = RetentionOptions.First(option => option.Days == retentionDays);
-            await _database.PruneSnapshotsAsync(retentionDays);
+            var retentionOption = RetentionOptions.FirstOrDefault(option => option.Days == retentionDays)
+                ?? RetentionOptions.First(option => option.Days == 180);
+            SelectedRetentionOption = retentionOption;
+            await _database.PruneSnapshotsAsync(retentionOption.Days);
             _retentionInitialized = true;
         }
 
