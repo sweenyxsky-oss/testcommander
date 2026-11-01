@@ -30,6 +30,7 @@
         <TextBlock DockPanel.Dock="Right" Text="{Binding Status}" Foreground="#A9B7C2" VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="440"/>
       </DockPanel>
       <DockPanel Grid.Row="1" Margin="0,0,0,12">
+        <Button Content="Clear local data" DockPanel.Dock="Right" Click="ClearData_Click"/>
         <Button Content="Go" DockPanel.Dock="Right" Width="70" Click="Navigate_Click"/>
         <Button Content="↻" DockPanel.Dock="Right" Width="42" Click="Refresh_Click"/>
         <TextBox x:Name="AddressBox" Text="{Binding Address, UpdateSourceTrigger=PropertyChanged}" Margin="4" KeyDown="AddressBox_KeyDown"/>
