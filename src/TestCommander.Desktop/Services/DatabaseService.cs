@@ -208,7 +208,6 @@ public sealed class DatabaseService
     private static int? ReadNullableInt(SqliteDataReader reader, int index) => reader.IsDBNull(index) ? null : reader.GetInt32(index);
     private static void AddNullable(SqliteCommand command, string name, int? value) =>
         command.Parameters.AddWithValue(name, value is null ? DBNull.Value : value.Value);
-}
 
     public async Task ClearObservedDataAsync(CancellationToken cancellationToken = default)
     {
