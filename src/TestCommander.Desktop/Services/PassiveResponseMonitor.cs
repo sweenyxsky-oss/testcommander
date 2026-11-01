@@ -76,8 +76,9 @@ public sealed class PassiveResponseMonitor(DatabaseService database)
             var snapshot = GamePayloadParser.TryCreateSnapshot(document.RootElement);
             if (snapshot is not null)
             {
-                await database.SaveSnapshotAsync(snapshot);
-                SnapshotCaptured?.Invoke(this, snapshot);
+                var wasSaved = await database.SaveSnapshotAsync(snapshot);
+                if (wasSaved)
+                    SnapshotCaptured?.Invoke(this, snapshot);
             }
             StatusChanged?.Invoke(this, $"Observed JSON response: {requestUri.AbsolutePath} ({buffer.Length:N0} bytes).");
         }
