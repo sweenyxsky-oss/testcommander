@@ -58,7 +58,7 @@
             <TextBlock DockPanel.Dock="Top" Text="ALL VILLAGES • COMPARISON" Foreground="#D6A65F" FontWeight="SemiBold" FontSize="9" Margin="0,0,0,5"/>
             <DataGrid DockPanel.Dock="Top" ItemsSource="{Binding VillageComparisons}" AutoGenerateColumns="False"
                       Height="128" MinHeight="65" MaxHeight="160" HeadersVisibility="Column"
-                      CanUserSortColumns="True" CanUserResizeColumns="True" CanUserReorderColumns="True"
+                      CanUserSortColumns="False" CanUserResizeColumns="True" CanUserReorderColumns="True"
                       HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Margin="0,0,0,8">
               <DataGrid.Columns>
                 <DataGridTextColumn Header="Village" Binding="{Binding VillageName}" Width="120"/>
