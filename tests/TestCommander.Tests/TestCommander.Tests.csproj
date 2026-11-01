@@ -16,6 +16,6 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\TestCommander.Desktop\TestCommander.Desktop.csproj" />
+    <ProjectReference Include="..\..\src\TestCommander.Desktop\TestCommander.Desktop.csproj" />
   </ItemGroup>
 </Project>
