@@ -1,4 +1,6 @@
+using System.IO;
 using System.Windows;
+using Microsoft.Win32;
 using System.Windows.Input;
 using System.Windows.Controls;
 using TestCommander.Models;
@@ -128,6 +130,32 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             _viewModel.Status = $"Could not update snapshot retention: {ex.Message}";
+        }
+    }
+
+    private async void ExportCsv_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new SaveFileDialog
+        {
+            Title = "Export village resource history",
+            Filter = "CSV files (*.csv)|*.csv",
+            DefaultExt = ".csv",
+            AddExtension = true,
+            FileName = $"TestCommander-resource-history-{DateTime.Now:yyyyMMdd}.csv",
+            OverwritePrompt = true
+        };
+
+        if (dialog.ShowDialog(this) != true) return;
+
+        try
+        {
+            await using var stream = new FileStream(dialog.FileName, FileMode.Create, FileAccess.Write, FileShare.None);
+            await _database.ExportSnapshotsCsvAsync(stream);
+            _viewModel.Status = $"Export completed: {Path.GetFileName(dialog.FileName)}";
+        }
+        catch (Exception ex)
+        {
+            _viewModel.Status = $"CSV export failed: {ex.Message}";
         }
     }
 
