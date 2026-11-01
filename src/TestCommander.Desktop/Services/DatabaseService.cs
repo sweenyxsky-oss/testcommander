@@ -10,13 +10,25 @@ public sealed class DatabaseService
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
     private bool _initialized;
 
-    public DatabaseService()
+    public DatabaseService(string? databasePath = null)
     {
-        AppPaths.EnsureCreated();
+        var usePooling = string.IsNullOrWhiteSpace(databasePath);
+        if (usePooling)
+        {
+            AppPaths.EnsureCreated();
+            databasePath = AppPaths.Database;
+        }
+        else
+        {
+            databasePath = Path.GetFullPath(databasePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
+        }
+
         _connectionString = new SqliteConnectionStringBuilder
         {
-            DataSource = AppPaths.Database, Mode = SqliteOpenMode.ReadWriteCreate,
-            Cache = SqliteCacheMode.Shared, Pooling = true, DefaultTimeout = 5
+            DataSource = databasePath, Mode = SqliteOpenMode.ReadWriteCreate,
+            Cache = SqliteCacheMode.Shared, Pooling = usePooling,
+            DefaultTimeout = 5
         }.ToString();
     }
 
