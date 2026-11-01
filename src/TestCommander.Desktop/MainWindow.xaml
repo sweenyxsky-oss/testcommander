@@ -70,6 +70,7 @@
                             </DataTemplate>
                           </ItemsControl.ItemTemplate>
                         </ItemsControl>
+                        <TextBlock Text="{Binding HistorySummary}" Foreground="#A9B7C2" FontSize="9" TextWrapping="Wrap" Margin="0,5,0,0"/>
                       </StackPanel>
                     </Border>
                   </DataTemplate>
