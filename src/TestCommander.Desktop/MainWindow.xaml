@@ -57,15 +57,18 @@
             </StackPanel>
             <TextBlock DockPanel.Dock="Top" Text="ALL VILLAGES • COMPARISON" Foreground="#D6A65F" FontWeight="SemiBold" FontSize="9" Margin="0,0,0,5"/>
             <DataGrid DockPanel.Dock="Top" ItemsSource="{Binding VillageComparisons}" AutoGenerateColumns="False"
-                      Height="112" MinHeight="55" MaxHeight="150" HeadersVisibility="Column"
+                      Height="128" MinHeight="65" MaxHeight="160" HeadersVisibility="Column"
                       CanUserSortColumns="True" CanUserResizeColumns="True" CanUserReorderColumns="True"
                       HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Margin="0,0,0,8">
               <DataGrid.Columns>
-                <DataGridTextColumn Header="Village" Binding="{Binding VillageName}" Width="1.15*"/>
-                <DataGridTextColumn Header="Wood" Binding="{Binding Wood}" Width="*"/>
-                <DataGridTextColumn Header="Clay" Binding="{Binding Clay}" Width="*"/>
-                <DataGridTextColumn Header="Iron" Binding="{Binding Iron}" Width="*"/>
-                <DataGridTextColumn Header="Crop" Binding="{Binding Crop}" Width="*"/>
+                <DataGridTextColumn Header="Village" Binding="{Binding VillageName}" Width="120"/>
+                <DataGridTextColumn Header="Wood • stock / Δ" Binding="{Binding Wood}" Width="150"/>
+                <DataGridTextColumn Header="Clay • stock / Δ" Binding="{Binding Clay}" Width="150"/>
+                <DataGridTextColumn Header="Iron • stock / Δ" Binding="{Binding Iron}" Width="150"/>
+                <DataGridTextColumn Header="Crop • stock / Δ" Binding="{Binding Crop}" Width="150"/>
+                <DataGridTextColumn Header="Warehouse • W/C/I" Binding="{Binding WarehouseUtilization}" Width="180"/>
+                <DataGridTextColumn Header="Granary" Binding="{Binding GranaryUtilization}" Width="100"/>
+                <DataGridTextColumn Header="Captured" Binding="{Binding CapturedAt}" Width="120"/>
               </DataGrid.Columns>
             </DataGrid>
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
