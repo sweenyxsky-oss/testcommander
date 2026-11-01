@@ -11,6 +11,8 @@ public sealed class DatabaseService
     private readonly string _connectionString;
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
     private readonly SemaphoreSlim _snapshotWriteGate = new(1, 1);
+    private readonly SemaphoreSlim _operationGate = new(1, 1);
+    private readonly string _databasePath;
     private bool _initialized;
 
     public DatabaseService(string? databasePath = null)
@@ -27,9 +29,10 @@ public sealed class DatabaseService
                 Directory.CreateDirectory(directory);
         }
 
+        _databasePath = Path.GetFullPath(databasePath);
         _connectionString = new SqliteConnectionStringBuilder
         {
-            DataSource = databasePath,
+            DataSource = _databasePath,
             Mode = SqliteOpenMode.ReadWriteCreate,
             Cache = SqliteCacheMode.Shared,
             Pooling = databasePath == AppPaths.Database,
@@ -39,7 +42,22 @@ public sealed class DatabaseService
 
     private async Task<SqliteConnection> OpenAsync(CancellationToken cancellationToken = default)
     {
+        await _operationGate.WaitAsync(cancellationToken);
         var connection = new SqliteConnection(_connectionString);
+        var gateReleased = 0;
+        void ReleaseGate()
+        {
+            if (Interlocked.Exchange(ref gateReleased, 1) == 0)
+                _operationGate.Release();
+        }
+
+        connection.StateChange += (_, args) =>
+        {
+            if (args.OriginalState != System.Data.ConnectionState.Closed &&
+                args.CurrentState == System.Data.ConnectionState.Closed)
+                ReleaseGate();
+        };
+
         try
         {
             await connection.OpenAsync(cancellationToken);
@@ -49,6 +67,7 @@ public sealed class DatabaseService
         catch
         {
             await connection.DisposeAsync();
+            ReleaseGate();
             throw;
         }
     }
@@ -268,6 +287,201 @@ public sealed class DatabaseService
         command.CommandText = "DELETE FROM village_snapshots WHERE captured_at < $cutoff";
         command.Parameters.AddWithValue("$cutoff", cutoff);
         return await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<string> CreateBackupAsync(
+        string destinationPath, CancellationToken cancellationToken = default)
+    {
+        var destination = NormalizeBackupPath(destinationPath);
+        if (PathsEqual(destination, _databasePath))
+            throw new ArgumentException("The backup destination cannot be the live database.", nameof(destinationPath));
+
+        await _operationGate.WaitAsync(cancellationToken);
+        var temporaryPath = destination + ".tmp-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            await BackupFileAsync(_connectionString, temporaryPath, initializeSource: true, cancellationToken);
+            await ValidateBackupFileAsync(temporaryPath, cancellationToken);
+            File.Move(temporaryPath, destination, overwrite: true);
+            return destination;
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+            _operationGate.Release();
+        }
+    }
+
+    public async Task ValidateBackupAsync(string backupPath, CancellationToken cancellationToken = default)
+    {
+        var path = NormalizeBackupPath(backupPath);
+        await _operationGate.WaitAsync(cancellationToken);
+        try
+        {
+            await ValidateBackupFileAsync(path, cancellationToken);
+        }
+        finally
+        {
+            _operationGate.Release();
+        }
+    }
+
+    public async Task<string> RestoreBackupAsync(
+        string backupPath, CancellationToken cancellationToken = default)
+    {
+        var sourcePath = NormalizeBackupPath(backupPath);
+        if (PathsEqual(sourcePath, _databasePath))
+            throw new ArgumentException("Choose a backup file, not the currently open database.", nameof(backupPath));
+
+        await _operationGate.WaitAsync(cancellationToken);
+        var safetyPath = _databasePath + ".pre-restore-" +
+            DateTime.UtcNow.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture) + ".db";
+        var stagedPath = _databasePath + ".restore-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            await ValidateBackupFileAsync(sourcePath, cancellationToken);
+
+            // Preserve the current live database before any replacement is attempted.
+            await BackupFileAsync(_connectionString, safetyPath, initializeSource: true, cancellationToken);
+            await ValidateBackupFileAsync(safetyPath, cancellationToken);
+
+            // Stage and validate the selected backup before touching the live database.
+            var sourceBuilder = new SqliteConnectionStringBuilder
+            {
+                DataSource = sourcePath,
+                Mode = SqliteOpenMode.ReadOnly,
+                Pooling = false
+            };
+            await BackupFileAsync(sourceBuilder.ToString(), stagedPath, initializeSource: false, cancellationToken);
+            await ValidateBackupFileAsync(stagedPath, cancellationToken);
+
+            // All app database operations are serialized by _operationGate.
+            SqliteConnection.ClearAllPools();
+            DeleteIfExists(_databasePath + "-wal");
+            DeleteIfExists(_databasePath + "-shm");
+            File.Move(stagedPath, _databasePath, overwrite: true);
+            _initialized = false;
+            return safetyPath;
+        }
+        finally
+        {
+            if (File.Exists(stagedPath)) File.Delete(stagedPath);
+            _operationGate.Release();
+        }
+    }
+
+    private static async Task BackupFileAsync(
+        string sourceConnectionString, string destinationPath, bool initializeSource,
+        CancellationToken cancellationToken)
+    {
+        var destinationBuilder = new SqliteConnectionStringBuilder
+        {
+            DataSource = destinationPath,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            Pooling = false,
+            DefaultTimeout = 10
+        };
+
+        await using var source = new SqliteConnection(sourceConnectionString);
+        await source.OpenAsync(cancellationToken);
+        if (initializeSource)
+            await EnsureSchemaForBackupAsync(source, cancellationToken);
+
+        await using (var destination = new SqliteConnection(destinationBuilder.ToString()))
+        {
+            await destination.OpenAsync(cancellationToken);
+            source.BackupDatabase(destination);
+        }
+
+        if (initializeSource)
+        {
+            await using var checkpoint = source.CreateCommand();
+            checkpoint.CommandText = "PRAGMA wal_checkpoint(TRUNCATE)";
+            await checkpoint.ExecuteNonQueryAsync(cancellationToken);
+        }
+    }
+
+    private static async Task EnsureSchemaForBackupAsync(
+        SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            PRAGMA journal_mode=WAL;
+            PRAGMA foreign_keys=ON;
+            PRAGMA busy_timeout=5000;
+            CREATE TABLE IF NOT EXISTS captured_responses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                url_path TEXT NOT NULL,
+                content_type TEXT NOT NULL,
+                status_code INTEGER NOT NULL,
+                body_bytes INTEGER NOT NULL,
+                captured_at TEXT NOT NULL,
+                summary TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS village_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                village_name TEXT NOT NULL,
+                wood INTEGER NULL, clay INTEGER NULL, iron INTEGER NULL, crop INTEGER NULL,
+                warehouse_capacity INTEGER NULL, granary_capacity INTEGER NULL,
+                captured_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS app_settings (
+                setting_key TEXT PRIMARY KEY,
+                setting_value TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS ix_response_time ON captured_responses(captured_at DESC);
+            CREATE INDEX IF NOT EXISTS ix_snapshot_village_time ON village_snapshots(village_name, captured_at DESC);
+            """;
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task ValidateBackupFileAsync(string path, CancellationToken cancellationToken)
+    {
+        if (!File.Exists(path) || new FileInfo(path).Length == 0)
+            throw new InvalidDataException("The selected backup file is missing or empty.");
+
+        var builder = new SqliteConnectionStringBuilder
+        {
+            DataSource = path,
+            Mode = SqliteOpenMode.ReadOnly,
+            Pooling = false,
+            DefaultTimeout = 10
+        };
+        await using var connection = new SqliteConnection(builder.ToString());
+        await connection.OpenAsync(cancellationToken);
+
+        await using (var integrity = connection.CreateCommand())
+        {
+            integrity.CommandText = "PRAGMA integrity_check";
+            var result = Convert.ToString(await integrity.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
+            if (!string.Equals(result, "ok", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("SQLite reported that this backup is corrupt.");
+        }
+
+        await using var schema = connection.CreateCommand();
+        schema.CommandText = """
+            SELECT COUNT(*) FROM sqlite_master
+            WHERE type='table' AND name IN ('captured_responses','village_snapshots','app_settings')
+            """;
+        var tableCount = Convert.ToInt32(await schema.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
+        if (tableCount != 3)
+            throw new InvalidDataException("This file is not a compatible TestCommander database backup.");
+    }
+
+    private static string NormalizeBackupPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            throw new ArgumentException("A backup file path is required.", nameof(path));
+        return Path.GetFullPath(path);
+    }
+
+    private static bool PathsEqual(string first, string second) =>
+        string.Equals(first, second, StringComparison.OrdinalIgnoreCase);
+
+    private static void DeleteIfExists(string path)
+    {
+        if (File.Exists(path)) File.Delete(path);
     }
 
     public async Task ExportSnapshotsCsvAsync(Stream destination, CancellationToken cancellationToken = default)
