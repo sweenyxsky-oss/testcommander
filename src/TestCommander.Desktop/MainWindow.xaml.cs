@@ -207,18 +207,25 @@ public partial class MainWindow : Window
         if (confirmation != MessageBoxResult.Yes) return;
 
         var core = Browser.CoreWebView2;
-        if (core is not null)
-            await _monitor.DetachAndWaitAsync(core);
-
         try
         {
+            if (core is not null)
+                await _monitor.DetachAndWaitAsync(core);
+
             var safetyBackup = await _database.RestoreBackupAsync(dialog.FileName);
-            await _viewModel.ReloadAfterDatabaseRestoreAsync();
-            _viewModel.Status = $"Restore completed. Previous data preserved at: {Path.GetFileName(safetyBackup)}";
+            try
+            {
+                await _viewModel.ReloadAfterDatabaseRestoreAsync();
+                _viewModel.Status = $"Restore completed. Previous data preserved at: {Path.GetFileName(safetyBackup)}";
+            }
+            catch (Exception refreshException)
+            {
+                _viewModel.Status = $"Database restore completed, but the dashboard refresh failed. Safety backup: {Path.GetFileName(safetyBackup)}. {refreshException.Message}";
+            }
         }
         catch (Exception ex)
         {
-            _viewModel.Status = $"Restore failed; the current database was not intentionally replaced. {ex.Message}";
+            _viewModel.Status = $"Database restore did not complete. The automatic safety backup is retained if it was created. {ex.Message}";
         }
         finally
         {
