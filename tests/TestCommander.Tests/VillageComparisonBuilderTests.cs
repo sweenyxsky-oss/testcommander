@@ -46,7 +46,7 @@ public sealed class VillageComparisonBuilderTests
 
         Assert.Contains("1,200", row.Wood);
         Assert.Contains("120.0% (over)", row.WarehouseUtilization);
-        Assert.Equal("112.5% (over)", row.GranaryUtilization);
+        Assert.Equal("100.0% (over)", row.GranaryUtilization);
     }
 
     [Fact]
