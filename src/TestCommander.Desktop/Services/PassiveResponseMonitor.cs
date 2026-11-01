@@ -14,6 +14,9 @@ public sealed class PassiveResponseMonitor(DatabaseService database)
     private const int MaxBodyBytes = 1_000_000;
     private Uri? _allowedOrigin;
     private int _isAttached;
+    private bool _paused;
+    private readonly object _processingLock = new();
+    private readonly HashSet<Task> _processingTasks = [];
 
     public event EventHandler<string>? StatusChanged;
     public event EventHandler<VillageSnapshot>? SnapshotCaptured;
@@ -25,6 +28,7 @@ public sealed class PassiveResponseMonitor(DatabaseService database)
 
     public void Attach(CoreWebView2 core)
     {
+        lock (_processingLock) _paused = false;
         if (Interlocked.Exchange(ref _isAttached, 1) == 1) return;
         core.WebResourceResponseReceived += OnResponseReceived;
         StatusChanged?.Invoke(this, "Passive monitoring enabled for the current site.");
@@ -32,13 +36,31 @@ public sealed class PassiveResponseMonitor(DatabaseService database)
 
     public void Detach(CoreWebView2 core)
     {
+        lock (_processingLock) _paused = true;
         if (Interlocked.Exchange(ref _isAttached, 0) == 0) return;
         core.WebResourceResponseReceived -= OnResponseReceived;
     }
 
+    public async Task DetachAndWaitAsync(CoreWebView2 core)
+    {
+        Detach(core);
+        Task[] pending;
+        lock (_processingLock) pending = _processingTasks.ToArray();
+        await Task.WhenAll(pending);
+    }
+
     private void OnResponseReceived(object? sender, CoreWebView2WebResourceResponseReceivedEventArgs args)
     {
-        _ = ProcessResponseAsync(args);
+        lock (_processingLock)
+        {
+            if (_paused) return;
+            var task = ProcessResponseAsync(args);
+            _processingTasks.Add(task);
+            _ = task.ContinueWith(completed =>
+            {
+                lock (_processingLock) _processingTasks.Remove(completed);
+            }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        }
     }
 
     private async Task ProcessResponseAsync(CoreWebView2WebResourceResponseReceivedEventArgs args)

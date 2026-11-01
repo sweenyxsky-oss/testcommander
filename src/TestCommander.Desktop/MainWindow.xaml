@@ -45,6 +45,8 @@
             <StackPanel DockPanel.Dock="Top">
               <DockPanel LastChildFill="False">
                 <TextBlock Text="VILLAGE RESOURCE MONITOR" Foreground="#D6A65F" FontWeight="SemiBold" FontSize="11" VerticalAlignment="Center"/>
+                <Button Content="Restore" DockPanel.Dock="Right" Padding="8,4" Margin="4,0,0,0" Click="RestoreBackup_Click"/>
+                <Button Content="Backup" DockPanel.Dock="Right" Padding="8,4" Margin="4,0,0,0" Click="CreateBackup_Click"/>
                 <Button Content="Export CSV" DockPanel.Dock="Right" Padding="8,4" Margin="4,0,0,0" Click="ExportCsv_Click"/>
                 <ComboBox x:Name="RetentionSelector" DockPanel.Dock="Right" Width="88" Margin="6,0,0,0"
                           ItemsSource="{Binding RetentionOptions}" DisplayMemberPath="Label"
