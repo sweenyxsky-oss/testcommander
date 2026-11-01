@@ -8,13 +8,19 @@ namespace TestCommander.Services;
 /// </summary>
 public static class VillageResourceCalculator
 {
-    public static VillageResourceOverview Create(VillageSnapshot snapshot, VillageSnapshot? previous = null)
+    public static VillageResourceOverview Create(
+        VillageSnapshot snapshot,
+        VillageSnapshot? previous = null,
+        IReadOnlyList<VillageSnapshot>? history = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
         var changes = previous is null
             ? Array.Empty<ResourceChange>()
             : CreateChanges(snapshot, previous);
+        var trendSamples = history ?? (previous is null
+            ? new[] { snapshot }
+            : new[] { previous, snapshot });
 
         return new VillageResourceOverview(
             snapshot.VillageName,
@@ -25,7 +31,8 @@ public static class VillageResourceCalculator
                 new ResourceGauge("Iron", snapshot.Iron, snapshot.WarehouseCapacity),
                 new ResourceGauge("Crop", snapshot.Crop, snapshot.GranaryCapacity)
             ],
-            changes);
+            changes,
+            ResourceTrendCalculator.Create(trendSamples));
     }
 
     private static IReadOnlyList<ResourceChange> CreateChanges(VillageSnapshot current, VillageSnapshot previous)
