@@ -69,7 +69,7 @@ public sealed class GamePayloadParserTests
     [Fact]
     public void RejectsNegativeAndOutOfRangeValuesInsteadOfDisplayingThem()
     {
-        using var json = JsonDocument.Parse("""{"resources":{"wood":-5,"clay":999999999999,"iron":"-2","crop":75}}""");
+        using var json = JsonDocument.Parse("""{"villageName":"Village invalid values","resources":{"wood":-5,"clay":999999999999,"iron":"-2","crop":75}}""");
 
         var result = GamePayloadParser.TryCreateSnapshot(json.RootElement);
 
