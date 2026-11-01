@@ -79,8 +79,9 @@ public sealed class PassiveResponseMonitor(DatabaseService database)
                 !SameOrigin(requestUri, Volatile.Read(ref _allowedOrigin))) return;
 
             var capturedAt = DateTimeOffset.UtcNow;
+            var safePath = SanitizePath(requestUri.AbsolutePath);
             var summary = $"Resources: {(parsed.Resources is null ? "no" : "yes")}; queues: {parsed.Queues.Count}; troop movements: {parsed.TroopMovements.Count}";
-            await database.SaveResponseAsync(new(requestUri.AbsolutePath, contentType, response.StatusCode,
+            await database.SaveResponseAsync(new(safePath, contentType, response.StatusCode,
                 checked((int)buffer.Length), capturedAt, summary)).ConfigureAwait(false);
 
             if (parsed.Resources is not null)
@@ -88,7 +89,7 @@ public sealed class PassiveResponseMonitor(DatabaseService database)
 
             await database.SaveObservationsAsync(parsed.Queues, parsed.TroopMovements, capturedAt).ConfigureAwait(false);
             DataCaptured?.Invoke(this, EventArgs.Empty);
-            StatusChanged?.Invoke(this, $"Observed JSON response: {requestUri.AbsolutePath} ({buffer.Length:N0} bytes).");
+            StatusChanged?.Invoke(this, $"Observed JSON response: {safePath} ({buffer.Length:N0} bytes).");
         }
         catch (System.Text.Json.JsonException)
         {
@@ -106,6 +107,13 @@ public sealed class PassiveResponseMonitor(DatabaseService database)
         {
             _processingSlots.Release();
         }
+    }
+
+    private static string SanitizePath(string path)
+    {
+        var withoutGuid = System.Text.RegularExpressions.Regex.Replace(path,
+            @"(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", "{id}");
+        return System.Text.RegularExpressions.Regex.Replace(withoutGuid, @"(?<![A-Za-z])\d{5,}", "{id}");
     }
 
     private static bool SameOrigin(Uri candidate, Uri? allowed) =>

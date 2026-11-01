@@ -92,7 +92,13 @@ public sealed class DatabaseService
         await using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO village_snapshots(village_name,wood,clay,iron,crop,warehouse_capacity,granary_capacity,captured_at)
-            VALUES($name,$wood,$clay,$iron,$crop,$warehouse,$granary,$at);
+            SELECT $name,$wood,$clay,$iron,$crop,$warehouse,$granary,$at
+            WHERE NOT EXISTS (
+                SELECT 1 FROM village_snapshots
+                WHERE village_name=$name AND wood IS $wood AND clay IS $clay AND iron IS $iron
+                  AND crop IS $crop AND warehouse_capacity IS $warehouse
+                  AND granary_capacity IS $granary AND captured_at >= $cutoff
+            );
             DELETE FROM village_snapshots WHERE id NOT IN (SELECT id FROM village_snapshots ORDER BY id DESC LIMIT 10000);
             """;
         command.Parameters.AddWithValue("$name", item.VillageName);
@@ -100,6 +106,7 @@ public sealed class DatabaseService
         AddNullable(command, "$iron", item.Iron); AddNullable(command, "$crop", item.Crop);
         AddNullable(command, "$warehouse", item.WarehouseCapacity); AddNullable(command, "$granary", item.GranaryCapacity);
         command.Parameters.AddWithValue("$at", item.CapturedAt.ToString("O"));
+        command.Parameters.AddWithValue("$cutoff", item.CapturedAt.AddSeconds(-30).ToString("O"));
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
