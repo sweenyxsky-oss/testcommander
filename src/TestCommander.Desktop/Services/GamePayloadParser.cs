@@ -28,7 +28,10 @@ public static class GamePayloadParser
             return null;
 
         var capacities = FindDirectObject(root, "capacities", "storage") ?? root;
-        var villageName = ReadString(root, "villageName", "village_name", "name") ?? "Current village";
+        // A stable village identity is required before storing history. Without it,
+        // snapshots from different villages could be merged under one fallback label.
+        var villageName = ReadString(root, "villageName", "village_name", "name");
+        if (villageName is null) return null;
 
         return new VillageSnapshot(
             villageName,

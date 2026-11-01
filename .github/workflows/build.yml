@@ -2,7 +2,7 @@ name: Build and test Windows desktop app
 
 on:
   push:
-    branches: [main, rewrite/dotnet-wpf, feature/resource-monitor-tests]
+    branches: [main, rewrite/dotnet-wpf, feature/resource-monitor-tests, feature/resource-history-trends]
   pull_request:
     branches: [main]
   workflow_dispatch:

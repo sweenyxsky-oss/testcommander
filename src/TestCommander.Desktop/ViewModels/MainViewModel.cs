@@ -28,12 +28,18 @@ public sealed class MainViewModel : INotifyPropertyChanged
             RecentResponses.Add(response);
 
         ResourceOverviews.Clear();
-        foreach (var snapshot in await _database.GetLatestSnapshotsAsync())
-            ResourceOverviews.Add(VillageResourceCalculator.Create(snapshot));
+        var latestSnapshots = await _database.GetLatestSnapshotsAsync();
+        foreach (var latest in latestSnapshots)
+        {
+            var history = await _database.GetRecentSnapshotsAsync(latest.VillageName, 2);
+            var current = history.Count > 0 ? history[^1] : latest;
+            var previous = history.Count > 1 ? history[^2] : null;
+            ResourceOverviews.Add(VillageResourceCalculator.Create(current, previous));
+        }
 
         ResourceSummary = ResourceOverviews.Count == 0
             ? "No village data captured yet"
-            : $"{ResourceOverviews.Count} village(s) • storage utilization from latest captured values";
+            : $"{ResourceOverviews.Count} village(s) • latest storage utilization and change since previous distinct sample";
     }
 
     private void Set<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)

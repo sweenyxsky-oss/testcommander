@@ -45,6 +45,14 @@ public sealed class GamePayloadParserTests
     }
 
     [Fact]
+    public void DoesNotCreateHistoryForResourcesWithoutVillageIdentity()
+    {
+        using var json = JsonDocument.Parse("""{"resources":{"wood":10,"clay":20,"iron":30,"crop":40}}""");
+
+        Assert.Null(GamePayloadParser.TryCreateSnapshot(json.RootElement));
+    }
+
+    [Fact]
     public void DoesNotMistakeBuildCostsForCurrentVillageStock()
     {
         using var json = JsonDocument.Parse("""
@@ -61,7 +69,7 @@ public sealed class GamePayloadParserTests
     [Fact]
     public void RejectsNegativeAndOutOfRangeValuesInsteadOfDisplayingThem()
     {
-        using var json = JsonDocument.Parse("""{"resources":{"wood":-5,"clay":999999999999,"iron":"-2","crop":75}}""");
+        using var json = JsonDocument.Parse("""{"villageName":"Village invalid values","resources":{"wood":-5,"clay":999999999999,"iron":"-2","crop":75}}""");
 
         var result = GamePayloadParser.TryCreateSnapshot(json.RootElement);
 
