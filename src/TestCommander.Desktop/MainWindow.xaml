@@ -54,7 +54,10 @@
                       <TextBlock Text="{Binding Clay, StringFormat='Clay: {0}'}" Foreground="#A9B7C2" Margin="0,2,9,0"/>
                       <TextBlock Text="{Binding Iron, StringFormat='Iron: {0}'}" Foreground="#A9B7C2" Margin="0,2,9,0"/>
                       <TextBlock Text="{Binding Crop, StringFormat='Crop: {0}'}" Foreground="#A9B7C2" Margin="0,2,0,0"/>
+                      <TextBlock Text="{Binding WarehouseCapacity, StringFormat='Warehouse: {0}'}" Foreground="#A9B7C2" Margin="9,2,9,0"/>
+                      <TextBlock Text="{Binding GranaryCapacity, StringFormat='Granary: {0}'}" Foreground="#A9B7C2" Margin="0,2,0,0"/>
                     </WrapPanel>
+                    <TextBlock Text="{Binding CapturedAt, StringFormat='Observed: {0:HH:mm:ss}'}" Foreground="#71818E" FontSize="9" Margin="0,2,0,0"/>
                   </StackPanel>
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
