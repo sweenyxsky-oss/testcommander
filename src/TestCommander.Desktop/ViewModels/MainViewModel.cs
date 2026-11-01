@@ -25,6 +25,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public MainViewModel(DatabaseService database) => _database = database;
 
+    public async Task ClearObservedDataAsync()
+    {
+        await _database.ClearObservedDataAsync();
+        await RefreshAsync();
+        Status = "Local monitoring data cleared. Your browser session was kept.";
+    }
+
     public async Task RefreshAsync()
     {
         RecentResponses.Clear();
