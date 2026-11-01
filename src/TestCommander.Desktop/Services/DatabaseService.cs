@@ -1,0 +1,114 @@
+using Microsoft.Data.Sqlite;
+using TestCommander.Models;
+
+namespace TestCommander.Services;
+
+public sealed class DatabaseService
+{
+    private readonly string _connectionString;
+    public DatabaseService()
+    {
+        AppPaths.EnsureCreated();
+        _connectionString = new SqliteConnectionStringBuilder { DataSource = AppPaths.Database, Mode = SqliteOpenMode.ReadWriteCreate, Cache = SqliteCacheMode.Shared }.ToString();
+    }
+
+    private async Task<SqliteConnection> OpenAsync(CancellationToken cancellationToken = default)
+    {
+        var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            PRAGMA journal_mode=WAL;
+            PRAGMA foreign_keys=ON;
+            CREATE TABLE IF NOT EXISTS captured_responses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                url_path TEXT NOT NULL,
+                content_type TEXT NOT NULL,
+                status_code INTEGER NOT NULL,
+                body_bytes INTEGER NOT NULL,
+                captured_at TEXT NOT NULL,
+                summary TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS village_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                village_name TEXT NOT NULL,
+                wood INTEGER NULL, clay INTEGER NULL, iron INTEGER NULL, crop INTEGER NULL,
+                warehouse_capacity INTEGER NULL, granary_capacity INTEGER NULL,
+                captured_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS ix_response_time ON captured_responses(captured_at DESC);
+            CREATE INDEX IF NOT EXISTS ix_snapshot_village_time ON village_snapshots(village_name, captured_at DESC);
+            """;
+        await command.ExecuteNonQueryAsync(cancellationToken);
+        return connection;
+    }
+
+    public async Task SaveResponseAsync(CapturedResponse item, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO captured_responses(url_path,content_type,status_code,body_bytes,captured_at,summary) VALUES($url,$type,$status,$bytes,$at,$summary)";
+        command.Parameters.AddWithValue("$url", item.UrlPath);
+        command.Parameters.AddWithValue("$type", item.ContentType);
+        command.Parameters.AddWithValue("$status", item.StatusCode);
+        command.Parameters.AddWithValue("$bytes", item.BodyBytes);
+        command.Parameters.AddWithValue("$at", item.CapturedAt.ToString("O"));
+        command.Parameters.AddWithValue("$summary", item.Summary);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task SaveSnapshotAsync(VillageSnapshot item, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO village_snapshots(village_name,wood,clay,iron,crop,warehouse_capacity,granary_capacity,captured_at)
+            VALUES($name,$wood,$clay,$iron,$crop,$warehouse,$granary,$at)
+            """;
+        command.Parameters.AddWithValue("$name", item.VillageName);
+        AddNullable(command, "$wood", item.Wood); AddNullable(command, "$clay", item.Clay);
+        AddNullable(command, "$iron", item.Iron); AddNullable(command, "$crop", item.Crop);
+        AddNullable(command, "$warehouse", item.WarehouseCapacity); AddNullable(command, "$granary", item.GranaryCapacity);
+        command.Parameters.AddWithValue("$at", item.CapturedAt.ToString("O"));
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<CapturedResponse>> GetRecentResponsesAsync(int limit = 30, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT url_path,content_type,status_code,body_bytes,captured_at,summary FROM captured_responses ORDER BY id DESC LIMIT $limit";
+        command.Parameters.AddWithValue("$limit", Math.Clamp(limit, 1, 200));
+        var results = new List<CapturedResponse>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            if (!DateTimeOffset.TryParse(reader.GetString(4), out var captured)) continue;
+            results.Add(new(reader.GetString(0), reader.GetString(1), reader.GetInt32(2), reader.GetInt32(3), captured, reader.GetString(5)));
+        }
+        return results;
+    }
+
+    public async Task<IReadOnlyList<VillageSnapshot>> GetLatestSnapshotsAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT s.village_name,s.wood,s.clay,s.iron,s.crop,s.warehouse_capacity,s.granary_capacity,s.captured_at
+            FROM village_snapshots s
+            INNER JOIN (SELECT village_name,MAX(id) AS max_id FROM village_snapshots GROUP BY village_name) latest ON latest.max_id=s.id
+            ORDER BY s.village_name
+            """;
+        var results = new List<VillageSnapshot>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            if (!DateTimeOffset.TryParse(reader.GetString(7), out var captured)) continue;
+            results.Add(new(reader.GetString(0), ReadNullableInt(reader,1), ReadNullableInt(reader,2), ReadNullableInt(reader,3), ReadNullableInt(reader,4), ReadNullableInt(reader,5), ReadNullableInt(reader,6), captured));
+        }
+        return results;
+    }
+
+    private static int? ReadNullableInt(SqliteDataReader reader, int index) => reader.IsDBNull(index) ? null : reader.GetInt32(index);
+    private static void AddNullable(SqliteCommand command, string name, int? value) => command.Parameters.AddWithValue(name, value is null ? DBNull.Value : value.Value);
+}
