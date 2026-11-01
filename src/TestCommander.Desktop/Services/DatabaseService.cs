@@ -342,7 +342,8 @@ public sealed class DatabaseService
 
         await _operationGate.WaitAsync(cancellationToken);
         var safetyPath = _databasePath + ".pre-restore-" +
-            DateTime.UtcNow.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture) + ".db";
+            DateTime.UtcNow.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture) +
+            "-" + Guid.NewGuid().ToString("N")[..8] + ".db";
         var stagedPath = _databasePath + ".restore-" + Guid.NewGuid().ToString("N");
         try
         {
@@ -473,6 +474,26 @@ public sealed class DatabaseService
         var tableCount = Convert.ToInt32(await schema.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
         if (tableCount != 3)
             throw new InvalidDataException("This file is not a compatible TestCommander database backup.");
+
+        var requiredColumns = new Dictionary<string, string[]>
+        {
+            ["captured_responses"] = ["url_path", "content_type", "status_code", "body_bytes", "captured_at", "summary"],
+            ["village_snapshots"] = ["village_name", "wood", "clay", "iron", "crop", "warehouse_capacity", "granary_capacity", "captured_at"],
+            ["app_settings"] = ["setting_key", "setting_value"]
+        };
+
+        foreach (var (table, columns) in requiredColumns)
+        {
+            await using var tableInfo = connection.CreateCommand();
+            tableInfo.CommandText = $"PRAGMA table_info('{table}')";
+            await using var reader = await tableInfo.ExecuteReaderAsync(cancellationToken);
+            var actualColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            while (await reader.ReadAsync(cancellationToken))
+                actualColumns.Add(reader.GetString(1));
+
+            if (columns.Any(column => !actualColumns.Contains(column)))
+                throw new InvalidDataException($"The backup is missing required columns from {table}.");
+        }
     }
 
     private static string NormalizeBackupPath(string path)
