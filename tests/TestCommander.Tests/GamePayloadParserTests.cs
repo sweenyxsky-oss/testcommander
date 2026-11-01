@@ -45,6 +45,14 @@ public sealed class GamePayloadParserTests
     }
 
     [Fact]
+    public void DoesNotCreateHistoryForResourcesWithoutVillageIdentity()
+    {
+        using var json = JsonDocument.Parse("""{"resources":{"wood":10,"clay":20,"iron":30,"crop":40}}""");
+
+        Assert.Null(GamePayloadParser.TryCreateSnapshot(json.RootElement));
+    }
+
+    [Fact]
     public void DoesNotMistakeBuildCostsForCurrentVillageStock()
     {
         using var json = JsonDocument.Parse("""
