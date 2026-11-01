@@ -1,14 +1,17 @@
-name: Build Windows desktop app
+name: Build and test Windows desktop app
 
 on:
   push:
-    branches: [main, rewrite/dotnet-wpf]
+    branches: [main, rewrite/dotnet-wpf, feature/resource-monitor-tests]
   pull_request:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  build:
+  build-and-test:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,3 +23,5 @@ jobs:
         run: dotnet restore .\TestCommander.sln
       - name: Build
         run: dotnet build .\TestCommander.sln --configuration Release --no-restore
+      - name: Unit tests
+        run: dotnet test .\TestCommander.sln --configuration Release --no-build --logger "console;verbosity=normal"
