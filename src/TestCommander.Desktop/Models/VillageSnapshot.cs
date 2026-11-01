@@ -1,3 +1,5 @@
+using TestCommander.Core.Models;
+
 namespace TestCommander.Models;
 
 public sealed record VillageSnapshot(
@@ -8,4 +10,9 @@ public sealed record VillageSnapshot(
     int? Crop,
     int? WarehouseCapacity,
     int? GranaryCapacity,
-    DateTimeOffset CapturedAt);
+    DateTimeOffset CapturedAt)
+{
+    public static VillageSnapshot From(ResourceSnapshot snapshot, DateTimeOffset capturedAt) =>
+        new(snapshot.VillageName, snapshot.Wood, snapshot.Clay, snapshot.Iron, snapshot.Crop,
+            snapshot.WarehouseCapacity, snapshot.GranaryCapacity, capturedAt);
+}

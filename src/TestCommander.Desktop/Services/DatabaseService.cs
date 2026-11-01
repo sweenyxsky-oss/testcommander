@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using TestCommander.Core.Models;
 using TestCommander.Models;
 
 namespace TestCommander.Services;
@@ -14,11 +15,8 @@ public sealed class DatabaseService
         AppPaths.EnsureCreated();
         _connectionString = new SqliteConnectionStringBuilder
         {
-            DataSource = AppPaths.Database,
-            Mode = SqliteOpenMode.ReadWriteCreate,
-            Cache = SqliteCacheMode.Shared,
-            Pooling = true,
-            DefaultTimeout = 5
+            DataSource = AppPaths.Database, Mode = SqliteOpenMode.ReadWriteCreate,
+            Cache = SqliteCacheMode.Shared, Pooling = true, DefaultTimeout = 5
         }.ToString();
     }
 
@@ -31,11 +29,7 @@ public sealed class DatabaseService
             await EnsureSchemaAsync(connection, cancellationToken);
             return connection;
         }
-        catch
-        {
-            await connection.DisposeAsync();
-            throw;
-        }
+        catch { await connection.DisposeAsync(); throw; }
     }
 
     private async Task EnsureSchemaAsync(SqliteConnection connection, CancellationToken cancellationToken)
@@ -51,31 +45,27 @@ public sealed class DatabaseService
                 PRAGMA foreign_keys=ON;
                 PRAGMA busy_timeout=5000;
                 CREATE TABLE IF NOT EXISTS captured_responses (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    url_path TEXT NOT NULL,
-                    content_type TEXT NOT NULL,
-                    status_code INTEGER NOT NULL,
-                    body_bytes INTEGER NOT NULL,
-                    captured_at TEXT NOT NULL,
-                    summary TEXT NOT NULL
-                );
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, url_path TEXT NOT NULL, content_type TEXT NOT NULL,
+                    status_code INTEGER NOT NULL, body_bytes INTEGER NOT NULL, captured_at TEXT NOT NULL, summary TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS village_snapshots (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    village_name TEXT NOT NULL,
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, village_name TEXT NOT NULL,
                     wood INTEGER NULL, clay INTEGER NULL, iron INTEGER NULL, crop INTEGER NULL,
-                    warehouse_capacity INTEGER NULL, granary_capacity INTEGER NULL,
-                    captured_at TEXT NOT NULL
-                );
+                    warehouse_capacity INTEGER NULL, granary_capacity INTEGER NULL, captured_at TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS queue_observations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, queue_type TEXT NOT NULL, item_name TEXT NOT NULL,
+                    level INTEGER NULL, completes_at TEXT NULL, observed_at TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS troop_movement_observations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, movement_type TEXT NOT NULL, origin TEXT NOT NULL,
+                    destination TEXT NOT NULL, arrives_at TEXT NULL, description TEXT NOT NULL, observed_at TEXT NOT NULL);
                 CREATE INDEX IF NOT EXISTS ix_response_time ON captured_responses(captured_at DESC);
                 CREATE INDEX IF NOT EXISTS ix_snapshot_village_time ON village_snapshots(village_name, captured_at DESC);
+                CREATE INDEX IF NOT EXISTS ix_queue_time ON queue_observations(observed_at DESC);
+                CREATE INDEX IF NOT EXISTS ix_movement_time ON troop_movement_observations(observed_at DESC);
                 """;
             await command.ExecuteNonQueryAsync(cancellationToken);
             _initialized = true;
         }
-        finally
-        {
-            _initializationGate.Release();
-        }
+        finally { _initializationGate.Release(); }
     }
 
     public async Task SaveResponseAsync(CapturedResponse item, CancellationToken cancellationToken = default)
@@ -101,14 +91,46 @@ public sealed class DatabaseService
             VALUES($name,$wood,$clay,$iron,$crop,$warehouse,$granary,$at)
             """;
         command.Parameters.AddWithValue("$name", item.VillageName);
-        AddNullable(command, "$wood", item.Wood);
-        AddNullable(command, "$clay", item.Clay);
-        AddNullable(command, "$iron", item.Iron);
-        AddNullable(command, "$crop", item.Crop);
-        AddNullable(command, "$warehouse", item.WarehouseCapacity);
-        AddNullable(command, "$granary", item.GranaryCapacity);
+        AddNullable(command, "$wood", item.Wood); AddNullable(command, "$clay", item.Clay);
+        AddNullable(command, "$iron", item.Iron); AddNullable(command, "$crop", item.Crop);
+        AddNullable(command, "$warehouse", item.WarehouseCapacity); AddNullable(command, "$granary", item.GranaryCapacity);
         command.Parameters.AddWithValue("$at", item.CapturedAt.ToString("O"));
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task SaveObservationsAsync(IReadOnlyList<QueueObservation> queues,
+        IReadOnlyList<TroopMovementObservation> movements, DateTimeOffset observedAt,
+        CancellationToken cancellationToken = default)
+    {
+        if (queues.Count == 0 && movements.Count == 0) return;
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        foreach (var queue in queues)
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = (SqliteTransaction)transaction;
+            command.CommandText = "INSERT INTO queue_observations(queue_type,item_name,level,completes_at,observed_at) VALUES($type,$name,$level,$complete,$observed)";
+            command.Parameters.AddWithValue("$type", queue.QueueType);
+            command.Parameters.AddWithValue("$name", queue.ItemName);
+            AddNullable(command, "$level", queue.Level);
+            command.Parameters.AddWithValue("$complete", queue.CompletesAt?.ToString("O") is { } complete ? complete : DBNull.Value);
+            command.Parameters.AddWithValue("$observed", observedAt.ToString("O"));
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+        foreach (var movement in movements)
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = (SqliteTransaction)transaction;
+            command.CommandText = "INSERT INTO troop_movement_observations(movement_type,origin,destination,arrives_at,description,observed_at) VALUES($type,$origin,$destination,$arrival,$description,$observed)";
+            command.Parameters.AddWithValue("$type", movement.MovementType);
+            command.Parameters.AddWithValue("$origin", movement.Origin);
+            command.Parameters.AddWithValue("$destination", movement.Destination);
+            command.Parameters.AddWithValue("$arrival", movement.ArrivesAt?.ToString("O") is { } arrival ? arrival : DBNull.Value);
+            command.Parameters.AddWithValue("$description", movement.Description);
+            command.Parameters.AddWithValue("$observed", observedAt.ToString("O"));
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await transaction.CommitAsync(cancellationToken);
     }
 
     public async Task<IReadOnlyList<CapturedResponse>> GetRecentResponsesAsync(int limit = 30, CancellationToken cancellationToken = default)
@@ -120,10 +142,8 @@ public sealed class DatabaseService
         var results = new List<CapturedResponse>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
-        {
-            if (!DateTimeOffset.TryParse(reader.GetString(4), out var captured)) continue;
-            results.Add(new(reader.GetString(0), reader.GetString(1), reader.GetInt32(2), reader.GetInt32(3), captured, reader.GetString(5)));
-        }
+            if (DateTimeOffset.TryParse(reader.GetString(4), out var captured))
+                results.Add(new(reader.GetString(0), reader.GetString(1), reader.GetInt32(2), reader.GetInt32(3), captured, reader.GetString(5)));
         return results;
     }
 
@@ -140,10 +160,8 @@ public sealed class DatabaseService
         var results = new List<VillageSnapshot>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
-        {
-            if (!DateTimeOffset.TryParse(reader.GetString(7), out var captured)) continue;
-            results.Add(new(reader.GetString(0), ReadNullableInt(reader, 1), ReadNullableInt(reader, 2), ReadNullableInt(reader, 3), ReadNullableInt(reader, 4), ReadNullableInt(reader, 5), ReadNullableInt(reader, 6), captured));
-        }
+            if (DateTimeOffset.TryParse(reader.GetString(7), out var captured))
+                results.Add(new(reader.GetString(0), ReadNullableInt(reader, 1), ReadNullableInt(reader, 2), ReadNullableInt(reader, 3), ReadNullableInt(reader, 4), ReadNullableInt(reader, 5), ReadNullableInt(reader, 6), captured));
         return results;
     }
 
