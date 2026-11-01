@@ -73,6 +73,45 @@ public sealed class VillageResourceCalculatorTests
         Assert.Equal("Stock not detected", result.Resources[0].UtilizationLabel);
     }
 
+    [Fact]
+    public void CalculatesObservedChangesWithoutCallingThemProduction()
+    {
+        var previous = CreateSnapshot(wood: 100, clay: 200, iron: 300, crop: 400, warehouse: 1000, granary: 800);
+        var current = CreateSnapshot(wood: 150, clay: 175, iron: 300, crop: 450, warehouse: 1000, granary: 800);
+
+        var result = VillageResourceCalculator.Create(current, previous);
+
+        Assert.Equal(4, result.Changes.Count);
+        Assert.Equal(50, result.Changes.Single(change => change.Name == "Wood").Delta);
+        Assert.Equal(-25, result.Changes.Single(change => change.Name == "Clay").Delta);
+        Assert.Equal(0, result.Changes.Single(change => change.Name == "Iron").Delta);
+        Assert.Contains("Since previous distinct sample", result.HistorySummary);
+        Assert.DoesNotContain("per hour", result.HistorySummary, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SkipsChangesWhenEitherSnapshotValueIsUnknown()
+    {
+        var previous = CreateSnapshot(wood: null, clay: 200, iron: 300, crop: 400, warehouse: 1000, granary: 800);
+        var current = CreateSnapshot(wood: 150, clay: null, iron: 350, crop: 450, warehouse: 1000, granary: 800);
+
+        var result = VillageResourceCalculator.Create(current, previous);
+
+        Assert.Equal(new[] { "Iron", "Crop" }, result.Changes.Select(change => change.Name));
+    }
+
+    [Fact]
+    public void DoesNotCompareSnapshotsFromDifferentVillages()
+    {
+        var previous = new VillageSnapshot("Village A", 100, 200, 300, 400, 1000, 800, DateTimeOffset.UtcNow);
+        var current = new VillageSnapshot("Village B", 150, 250, 350, 450, 1000, 800, DateTimeOffset.UtcNow);
+
+        var result = VillageResourceCalculator.Create(current, previous);
+
+        Assert.Empty(result.Changes);
+        Assert.Contains("Waiting for a second sample", result.HistorySummary);
+    }
+
     private static VillageSnapshot CreateSnapshot(int? wood, int? clay, int? iron, int? crop, int? warehouse, int? granary) =>
         new("Test village", wood, clay, iron, crop, warehouse, granary, DateTimeOffset.UtcNow);
 }
