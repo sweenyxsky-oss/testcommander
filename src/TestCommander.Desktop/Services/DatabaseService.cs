@@ -313,10 +313,18 @@ public sealed class DatabaseService
     {
         if (string.IsNullOrEmpty(value)) return string.Empty;
 
-        if (protectFormula && value[0] is '=' or '+' or '-' or '@' or '\\t' or '\\r')
-            value = "'" + value;
+        if (protectFormula)
+        {
+            var firstNonWhitespace = 0;
+            while (firstNonWhitespace < value.Length && char.IsWhiteSpace(value[firstNonWhitespace]))
+                firstNonWhitespace++;
 
-        if (value.IndexOfAny([',', '"', '\\r', '\\n']) < 0) return value;
+            if (firstNonWhitespace < value.Length &&
+                value[firstNonWhitespace] is '=' or '+' or '-' or '@')
+                value = "'" + value;
+        }
+
+        if (value.IndexOfAny([',', '"', '\r', '\n']) < 0) return value;
         return "\"" + value.Replace("\"", "\"\"") + "\"";
     }
 
