@@ -6,41 +6,76 @@ namespace TestCommander.Services;
 public sealed class DatabaseService
 {
     private readonly string _connectionString;
+    private readonly SemaphoreSlim _initializationGate = new(1, 1);
+    private bool _initialized;
+
     public DatabaseService()
     {
         AppPaths.EnsureCreated();
-        _connectionString = new SqliteConnectionStringBuilder { DataSource = AppPaths.Database, Mode = SqliteOpenMode.ReadWriteCreate, Cache = SqliteCacheMode.Shared }.ToString();
+        _connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = AppPaths.Database,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            Cache = SqliteCacheMode.Shared,
+            Pooling = true,
+            DefaultTimeout = 5
+        }.ToString();
     }
 
     private async Task<SqliteConnection> OpenAsync(CancellationToken cancellationToken = default)
     {
         var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            PRAGMA journal_mode=WAL;
-            PRAGMA foreign_keys=ON;
-            CREATE TABLE IF NOT EXISTS captured_responses (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                url_path TEXT NOT NULL,
-                content_type TEXT NOT NULL,
-                status_code INTEGER NOT NULL,
-                body_bytes INTEGER NOT NULL,
-                captured_at TEXT NOT NULL,
-                summary TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS village_snapshots (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                village_name TEXT NOT NULL,
-                wood INTEGER NULL, clay INTEGER NULL, iron INTEGER NULL, crop INTEGER NULL,
-                warehouse_capacity INTEGER NULL, granary_capacity INTEGER NULL,
-                captured_at TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS ix_response_time ON captured_responses(captured_at DESC);
-            CREATE INDEX IF NOT EXISTS ix_snapshot_village_time ON village_snapshots(village_name, captured_at DESC);
-            """;
-        await command.ExecuteNonQueryAsync(cancellationToken);
-        return connection;
+        try
+        {
+            await connection.OpenAsync(cancellationToken);
+            await EnsureSchemaAsync(connection, cancellationToken);
+            return connection;
+        }
+        catch
+        {
+            await connection.DisposeAsync();
+            throw;
+        }
+    }
+
+    private async Task EnsureSchemaAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        if (_initialized) return;
+        await _initializationGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (_initialized) return;
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                PRAGMA journal_mode=WAL;
+                PRAGMA foreign_keys=ON;
+                PRAGMA busy_timeout=5000;
+                CREATE TABLE IF NOT EXISTS captured_responses (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    url_path TEXT NOT NULL,
+                    content_type TEXT NOT NULL,
+                    status_code INTEGER NOT NULL,
+                    body_bytes INTEGER NOT NULL,
+                    captured_at TEXT NOT NULL,
+                    summary TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS village_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    village_name TEXT NOT NULL,
+                    wood INTEGER NULL, clay INTEGER NULL, iron INTEGER NULL, crop INTEGER NULL,
+                    warehouse_capacity INTEGER NULL, granary_capacity INTEGER NULL,
+                    captured_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS ix_response_time ON captured_responses(captured_at DESC);
+                CREATE INDEX IF NOT EXISTS ix_snapshot_village_time ON village_snapshots(village_name, captured_at DESC);
+                """;
+            await command.ExecuteNonQueryAsync(cancellationToken);
+            _initialized = true;
+        }
+        finally
+        {
+            _initializationGate.Release();
+        }
     }
 
     public async Task SaveResponseAsync(CapturedResponse item, CancellationToken cancellationToken = default)
@@ -66,9 +101,12 @@ public sealed class DatabaseService
             VALUES($name,$wood,$clay,$iron,$crop,$warehouse,$granary,$at)
             """;
         command.Parameters.AddWithValue("$name", item.VillageName);
-        AddNullable(command, "$wood", item.Wood); AddNullable(command, "$clay", item.Clay);
-        AddNullable(command, "$iron", item.Iron); AddNullable(command, "$crop", item.Crop);
-        AddNullable(command, "$warehouse", item.WarehouseCapacity); AddNullable(command, "$granary", item.GranaryCapacity);
+        AddNullable(command, "$wood", item.Wood);
+        AddNullable(command, "$clay", item.Clay);
+        AddNullable(command, "$iron", item.Iron);
+        AddNullable(command, "$crop", item.Crop);
+        AddNullable(command, "$warehouse", item.WarehouseCapacity);
+        AddNullable(command, "$granary", item.GranaryCapacity);
         command.Parameters.AddWithValue("$at", item.CapturedAt.ToString("O"));
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -104,11 +142,12 @@ public sealed class DatabaseService
         while (await reader.ReadAsync(cancellationToken))
         {
             if (!DateTimeOffset.TryParse(reader.GetString(7), out var captured)) continue;
-            results.Add(new(reader.GetString(0), ReadNullableInt(reader,1), ReadNullableInt(reader,2), ReadNullableInt(reader,3), ReadNullableInt(reader,4), ReadNullableInt(reader,5), ReadNullableInt(reader,6), captured));
+            results.Add(new(reader.GetString(0), ReadNullableInt(reader, 1), ReadNullableInt(reader, 2), ReadNullableInt(reader, 3), ReadNullableInt(reader, 4), ReadNullableInt(reader, 5), ReadNullableInt(reader, 6), captured));
         }
         return results;
     }
 
     private static int? ReadNullableInt(SqliteDataReader reader, int index) => reader.IsDBNull(index) ? null : reader.GetInt32(index);
-    private static void AddNullable(SqliteCommand command, string name, int? value) => command.Parameters.AddWithValue(name, value is null ? DBNull.Value : value.Value);
+    private static void AddNullable(SqliteCommand command, string name, int? value) =>
+        command.Parameters.AddWithValue(name, value is null ? DBNull.Value : value.Value);
 }

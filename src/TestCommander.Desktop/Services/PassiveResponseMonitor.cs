@@ -1,4 +1,3 @@
-using System.Text;
 using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using TestCommander.Models;
@@ -6,13 +5,13 @@ using TestCommander.Models;
 namespace TestCommander.Services;
 
 /// <summary>
-/// Observes JSON responses from the currently displayed game origin. It never sends requests,
-/// replays actions, reads cookies, or persists response bodies / authentication material.
+/// Observes JSON responses from the currently displayed origin. It never sends requests,
+/// replays actions, reads cookies, or persists response bodies or authentication material.
 /// </summary>
 public sealed class PassiveResponseMonitor(DatabaseService database)
 {
     private const int MaxBodyBytes = 1_000_000;
-    private string? _allowedHost;
+    private Uri? _allowedOrigin;
     private int _isAttached;
 
     public event EventHandler<string>? StatusChanged;
@@ -20,7 +19,7 @@ public sealed class PassiveResponseMonitor(DatabaseService database)
 
     public void SetAllowedOrigin(Uri? origin)
     {
-        _allowedHost = origin?.Host;
+        _allowedOrigin = origin is null ? null : new Uri(origin.GetLeftPart(UriPartial.Authority));
     }
 
     public void Attach(CoreWebView2 core)
@@ -45,10 +44,10 @@ public sealed class PassiveResponseMonitor(DatabaseService database)
     {
         try
         {
-            var requestUri = new Uri(args.Request.Uri);
-            if (string.IsNullOrWhiteSpace(_allowedHost) ||
-                !string.Equals(requestUri.Host, _allowedHost, StringComparison.OrdinalIgnoreCase) ||
-                requestUri.Scheme != Uri.UriSchemeHttps && requestUri.IsLoopback == false)
+            if (!Uri.TryCreate(args.Request.Uri, UriKind.Absolute, out var requestUri)) return;
+            var allowedOrigin = _allowedOrigin;
+            if (allowedOrigin is null ||
+                !string.Equals(requestUri.GetLeftPart(UriPartial.Authority), allowedOrigin.GetLeftPart(UriPartial.Authority), StringComparison.OrdinalIgnoreCase))
                 return;
 
             var response = args.Response;
@@ -66,18 +65,19 @@ public sealed class PassiveResponseMonitor(DatabaseService database)
                 if (buffer.Length + read > MaxBodyBytes) return;
                 buffer.Write(chunk, 0, read);
             }
-            var body = buffer.ToArray();
-            using var document = JsonDocument.Parse(body, new JsonDocumentOptions { MaxDepth = 32 });
+
+            using var document = JsonDocument.Parse(buffer.ToArray(), new JsonDocumentOptions { MaxDepth = 32 });
             var summary = JsonSummary.Create(document.RootElement);
-            var path = requestUri.AbsolutePath;
-            await database.SaveResponseAsync(new(path, contentType, response.StatusCode, body.Length, DateTimeOffset.UtcNow, summary));
+            await database.SaveResponseAsync(new(requestUri.AbsolutePath, contentType, response.StatusCode,
+                checked((int)buffer.Length), DateTimeOffset.UtcNow, summary));
+
             var snapshot = GamePayloadParser.TryCreateSnapshot(document.RootElement);
             if (snapshot is not null)
             {
                 await database.SaveSnapshotAsync(snapshot);
                 SnapshotCaptured?.Invoke(this, snapshot);
             }
-            StatusChanged?.Invoke(this, $"Observed JSON response: {path} ({body.Length:N0} bytes).");
+            StatusChanged?.Invoke(this, $"Observed JSON response: {requestUri.AbsolutePath} ({buffer.Length:N0} bytes).");
         }
         catch (JsonException)
         {
@@ -98,6 +98,7 @@ internal static class JsonSummary
         CollectKeys(root, keys, 0);
         return keys.Count == 0 ? "JSON payload observed" : "Fields: " + string.Join(", ", keys.Distinct().Take(12));
     }
+
     private static void CollectKeys(JsonElement element, List<string> keys, int depth)
     {
         if (depth > 5) return;
@@ -108,13 +109,13 @@ internal static class JsonSummary
                 CollectKeys(property.Value, keys, depth + 1);
             }
         else if (element.ValueKind == JsonValueKind.Array)
-            foreach (var item in element.EnumerateArray().Take(20)) CollectKeys(item, keys, depth + 1);
+            foreach (var item in element.EnumerateArray().Take(20))
+                CollectKeys(item, keys, depth + 1);
     }
 }
 
 internal static class GamePayloadParser
 {
-    private static readonly string[] ResourceAliases = ["wood", "lumber", "clay", "iron", "crop", "food"];
     public static VillageSnapshot? TryCreateSnapshot(JsonElement root)
     {
         var values = new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase);
@@ -124,11 +125,13 @@ internal static class GamePayloadParser
         var iron = Find(values, "iron");
         var crop = Find(values, "crop", "food");
         if (wood is null && clay is null && iron is null && crop is null) return null;
-        var village = FindString(root, "villageName", "village_name", "name") ?? "Current village";
+
+        var village = FindString(root, "villageName", "village_name") ?? "Current village";
         return new(village, wood, clay, iron, crop,
             Find(values, "warehouseCapacity", "warehouse_capacity"),
             Find(values, "granaryCapacity", "granary_capacity"), DateTimeOffset.UtcNow);
     }
+
     private static void Flatten(JsonElement element, Dictionary<string, int?> values, int depth)
     {
         if (depth > 8) return;
@@ -139,18 +142,23 @@ internal static class GamePayloadParser
                     values[property.Name] = number;
                 else if (property.Value.ValueKind == JsonValueKind.String && int.TryParse(property.Value.GetString(), out number))
                     values[property.Name] = number;
-                else Flatten(property.Value, values, depth + 1);
+                else
+                    Flatten(property.Value, values, depth + 1);
             }
         else if (element.ValueKind == JsonValueKind.Array)
-            foreach (var item in element.EnumerateArray().Take(100)) Flatten(item, values, depth + 1);
+            foreach (var item in element.EnumerateArray().Take(100))
+                Flatten(item, values, depth + 1);
     }
+
     private static int? Find(Dictionary<string, int?> values, params string[] aliases)
     {
         foreach (var alias in aliases)
             foreach (var pair in values)
-                if (string.Equals(pair.Key, alias, StringComparison.OrdinalIgnoreCase)) return pair.Value;
+                if (string.Equals(pair.Key, alias, StringComparison.OrdinalIgnoreCase))
+                    return pair.Value;
         return null;
     }
+
     private static string? FindString(JsonElement element, params string[] names)
     {
         if (element.ValueKind == JsonValueKind.Object)
