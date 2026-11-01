@@ -2,7 +2,10 @@ using TestCommander.Models;
 
 namespace TestCommander.Services;
 
-/// <summary>Projects existing village overviews into a stable, sortable comparison view.</summary>
+/// <summary>
+/// Creates a compact comparison from the latest observed overview for each village.
+/// Missing stocks and capacities remain explicit; no production is inferred.
+/// </summary>
 public static class VillageComparisonBuilder
 {
     public static IReadOnlyList<VillageComparisonRow> Create(IEnumerable<VillageResourceOverview> overviews)
@@ -13,28 +16,46 @@ public static class VillageComparisonBuilder
             .Where(overview => overview is not null)
             .OrderBy(overview => overview.VillageName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(overview => overview.VillageName, StringComparer.Ordinal)
-            .Select(overview => new VillageComparisonRow(
-                overview.VillageName,
-                Format(overview, "Wood"),
-                Format(overview, "Clay"),
-                Format(overview, "Iron"),
-                Format(overview, "Crop"),
-                overview.CapturedAt))
+            .Select(CreateRow)
             .ToArray();
     }
 
-    private static string Format(VillageResourceOverview overview, string name)
+    private static VillageComparisonRow CreateRow(VillageResourceOverview overview)
     {
-        var gauge = overview.Resources.FirstOrDefault(resource =>
-            string.Equals(resource.Name, name, StringComparison.OrdinalIgnoreCase));
-        if (gauge is null) return "Not detected";
+        var wood = Find(overview, "Wood");
+        var clay = Find(overview, "Clay");
+        var iron = Find(overview, "Iron");
+        var crop = Find(overview, "Crop");
 
-        var stock = gauge.Stock?.ToString("N0") ?? "—";
-        var capacity = gauge.Capacity is > 0 ? gauge.Capacity.Value.ToString("N0") : "cap —";
-        var utilization = gauge.HasCapacity ? $"{gauge.UtilizationPercent:0}%" : "—";
-        var change = overview.Changes.FirstOrDefault(item =>
-            string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase));
+        return new VillageComparisonRow(
+            overview.VillageName,
+            FormatResource(wood, FindChange(overview, "Wood")),
+            FormatResource(clay, FindChange(overview, "Clay")),
+            FormatResource(iron, FindChange(overview, "Iron")),
+            FormatResource(crop, FindChange(overview, "Crop")),
+            $"W {FormatUtilization(wood)} · C {FormatUtilization(clay)} · I {FormatUtilization(iron)}",
+            FormatUtilization(crop),
+            overview.CapturedAt.ToLocalTime().ToString("g"));
+    }
+
+    private static ResourceGauge? Find(VillageResourceOverview overview, string name) =>
+        overview.Resources.FirstOrDefault(item => string.Equals(item.Name, name, StringComparison.Ordinal));
+
+    private static ResourceChange? FindChange(VillageResourceOverview overview, string name) =>
+        overview.Changes.FirstOrDefault(item => string.Equals(item.Name, name, StringComparison.Ordinal));
+
+    private static string FormatResource(ResourceGauge? gauge, ResourceChange? change)
+    {
+        if (gauge?.Stock is not int stock) return "Not detected";
         var delta = change is null ? "Δ —" : $"Δ {change.Delta:+#,0;-#,0;0}";
-        return $"{stock} / {capacity} · {utilization} · {delta}";
+        return $"{stock:N0} ({delta})";
+    }
+
+    private static string FormatUtilization(ResourceGauge? gauge)
+    {
+        if (gauge is null || !gauge.HasCapacity) return "N/A";
+        return gauge.IsOverCapacity
+            ? $"{gauge.UtilizationPercent:0.0}% (over)"
+            : $"{gauge.UtilizationPercent:0.0}%";
     }
 }
