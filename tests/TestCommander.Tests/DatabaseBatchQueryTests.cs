@@ -160,6 +160,145 @@ public sealed class DatabaseBatchQueryTests
     }
 
     [Fact]
+    public async Task BatchQueryHandlesRealisticVillageAndSnapshotCountsWithinBoundedTime()
+    {
+        using var database = new TemporaryDatabase();
+        var service = new DatabaseService(database.Path);
+        var start = DateTimeOffset.UtcNow.AddDays(-7);
+        const int villageCount = 75;
+        const int snapshotsPerVillage = 400;
+        const int expectedSamplesPerVillage = 24;
+
+        // Initialize schema, then seed in one transaction so this test measures the batch read.
+        await service.GetRecentSnapshotsBatchAsync(limit: 1);
+        var seedConnectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = database.Path,
+            Pooling = false
+        }.ToString();
+        await using (var seedConnection = new SqliteConnection(seedConnectionString))
+        {
+            await seedConnection.OpenAsync();
+            await using var transaction = await seedConnection.BeginTransactionAsync();
+            await using var insert = seedConnection.CreateCommand();
+            insert.Transaction = (SqliteTransaction)transaction;
+            insert.CommandText = """
+                INSERT INTO village_snapshots(village_name, wood, clay, iron, crop, warehouse_capacity, granary_capacity, captured_at)
+                VALUES($name, $wood, $clay, $iron, $crop, 10000, 10000, $capturedAt)
+                """;
+            var name = insert.Parameters.Add("$name", SqliteType.Text);
+            var wood = insert.Parameters.Add("$wood", SqliteType.Integer);
+            var clay = insert.Parameters.Add("$clay", SqliteType.Integer);
+            var iron = insert.Parameters.Add("$iron", SqliteType.Integer);
+            var crop = insert.Parameters.Add("$crop", SqliteType.Integer);
+            var capturedAt = insert.Parameters.Add("$capturedAt", SqliteType.Text);
+
+            for (var village = 0; village < villageCount; village++)
+            for (var sample = 0; sample < snapshotsPerVillage; sample++)
+            {
+                name.Value = $"Village {village:D3}";
+                wood.Value = sample;
+                clay.Value = sample + 1;
+                iron.Value = sample + 2;
+                crop.Value = sample + 3;
+                capturedAt.Value = start.AddMinutes(village * snapshotsPerVillage + sample).ToString("O");
+                await insert.ExecuteNonQueryAsync();
+            }
+            await transaction.CommitAsync();
+        }
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var batch = await service.GetRecentSnapshotsBatchAsync(expectedSamplesPerVillage);
+        stopwatch.Stop();
+
+        Assert.Equal(villageCount, batch.Count);
+        Assert.All(batch.Values, history => Assert.Equal(expectedSamplesPerVillage, history.Count));
+        Assert.Equal(snapshotsPerVillage - expectedSamplesPerVillage, batch["Village 000"][0].Wood);
+        Assert.Equal(snapshotsPerVillage - 1, batch["Village 000"][^1].Wood);
+        // Generous ceiling is a regression sentinel, not a microbenchmark. CI variance is expected.
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(10),
+            $"Batch query took {stopwatch.Elapsed}; expected under 10 seconds for {villageCount * snapshotsPerVillage:N0} rows.");
+    }
+
+    [Fact]
+    public async Task EnsureSchemaAsyncCreatesBatchIndexOnExistingDatabaseWithoutLosingData()
+    {
+        using var database = new TemporaryDatabase();
+        var originalName = "Preserved village";
+        var originalCapturedAt = DateTimeOffset.UtcNow.ToString("O");
+
+        // Simulate a database created by an earlier version without the new index.
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = database.Path,
+            Pooling = false
+        }.ToString();
+        await using (var connection = new SqliteConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TABLE village_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    village_name TEXT NOT NULL,
+                    wood INTEGER NULL, clay INTEGER NULL, iron INTEGER NULL, crop INTEGER NULL,
+                    warehouse_capacity INTEGER NULL, granary_capacity INTEGER NULL,
+                    captured_at TEXT NOT NULL
+                );
+                INSERT INTO village_snapshots(village_name, wood, clay, iron, crop, warehouse_capacity, granary_capacity, captured_at)
+                VALUES($name, 321, 654, 987, 123, 5000, 6000, $capturedAt);
+                """;
+            command.Parameters.AddWithValue("$name", originalName);
+            command.Parameters.AddWithValue("$capturedAt", originalCapturedAt);
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var service = new DatabaseService(database.Path);
+        var batch = await service.GetRecentSnapshotsBatchAsync(12);
+
+        var preserved = Assert.Single(batch[originalName]);
+        Assert.Equal(321, preserved.Wood);
+        Assert.Equal(originalCapturedAt, preserved.CapturedAt.ToString("O"));
+
+        await using var verification = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = database.Path,
+            Mode = SqliteOpenMode.ReadOnly,
+            Pooling = false
+        }.ToString());
+        await verification.OpenAsync();
+        await using var indexCheck = verification.CreateCommand();
+        indexCheck.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='ix_snapshot_village_id'";
+        Assert.Equal(1L, (long)(await indexCheck.ExecuteScalarAsync())!);
+
+        await using var rowCheck = verification.CreateCommand();
+        rowCheck.CommandText = "SELECT COUNT(*) FROM village_snapshots";
+        Assert.Equal(1L, (long)(await rowCheck.ExecuteScalarAsync())!);
+    }
+
+    [Fact]
+    public async Task RefreshAsyncCoalescesRapidEventsWithoutOverlappingDatabaseReads()
+    {
+        using var database = new TemporaryDatabase();
+        var service = new BlockingDatabaseService(database.Path);
+        var viewModel = new MainViewModel(service);
+
+        var firstRefresh = viewModel.RefreshAsync();
+        await service.FirstReadStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var queuedRefreshes = Enumerable.Range(0, 20)
+            .Select(_ => viewModel.RefreshAsync())
+            .ToArray();
+
+        Assert.Equal(1, service.MaximumConcurrentReads);
+        service.ReleaseFirstRead.TrySetResult();
+        await Task.WhenAll(queuedRefreshes.Append(firstRefresh));
+
+        Assert.Equal(1, service.MaximumConcurrentReads);
+        Assert.Equal(2, service.GetRecentResponsesCallCount);
+    }
+
+    [Fact]
     public async Task BatchQueryUsesVillageNameIdIndexAccordingToQueryPlan()
     {
         using var database = new TemporaryDatabase();
@@ -208,6 +347,63 @@ public sealed class DatabaseBatchQueryTests
         SqliteConnection.ClearAllPools();
         var fullPlan = string.Join("\n", queryPlanLines);
         Assert.Contains("USING INDEX ix_snapshot_village_id", fullPlan);
+    }
+
+    private sealed class BlockingDatabaseService(string? databasePath = null) : DatabaseService(databasePath)
+    {
+        private int _activeReads;
+        private int _maximumConcurrentReads;
+        public TaskCompletionSource FirstReadStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReleaseFirstRead { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int MaximumConcurrentReads => Volatile.Read(ref _maximumConcurrentReads);
+        public int GetRecentResponsesCallCount { get; private set; }
+
+        public override async Task<IReadOnlyList<CapturedResponse>> GetRecentResponsesAsync(int limit = 30, CancellationToken cancellationToken = default)
+        {
+            GetRecentResponsesCallCount++;
+            var active = Interlocked.Increment(ref _activeReads);
+            UpdateMaximum(active);
+            try
+            {
+                if (GetRecentResponsesCallCount == 1)
+                {
+                    FirstReadStarted.TrySetResult();
+                    await ReleaseFirstRead.Task.WaitAsync(cancellationToken);
+                }
+                return await base.GetRecentResponsesAsync(limit, cancellationToken);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _activeReads);
+            }
+        }
+
+        public override async Task<IReadOnlyList<VillageSnapshot>> GetLatestSnapshotsAsync(CancellationToken cancellationToken = default)
+        {
+            var active = Interlocked.Increment(ref _activeReads);
+            UpdateMaximum(active);
+            try { return await base.GetLatestSnapshotsAsync(cancellationToken); }
+            finally { Interlocked.Decrement(ref _activeReads); }
+        }
+
+        public override async Task<IReadOnlyDictionary<string, IReadOnlyList<VillageSnapshot>>> GetRecentSnapshotsBatchAsync(
+            int limit = 12, CancellationToken cancellationToken = default)
+        {
+            var active = Interlocked.Increment(ref _activeReads);
+            UpdateMaximum(active);
+            try { return await base.GetRecentSnapshotsBatchAsync(limit, cancellationToken); }
+            finally { Interlocked.Decrement(ref _activeReads); }
+        }
+
+        private void UpdateMaximum(int current)
+        {
+            while (true)
+            {
+                var previous = Volatile.Read(ref _maximumConcurrentReads);
+                if (previous >= current || Interlocked.CompareExchange(ref _maximumConcurrentReads, current, previous) == previous)
+                    return;
+            }
+        }
     }
 
     private sealed class CountingDatabaseService(string? databasePath = null) : DatabaseService(databasePath)

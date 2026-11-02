@@ -25,7 +25,7 @@ public partial class MainWindow : Window
         _viewModel = new MainViewModel(_database);
         DataContext = _viewModel;
         _monitor.StatusChanged += (_, message) => Dispatcher.Invoke(() => _viewModel.Status = message);
-        _monitor.SnapshotCaptured += (_, _) => Dispatcher.InvokeAsync(_viewModel.RefreshAsync);
+        _monitor.SnapshotCaptured += (_, _) => Dispatcher.InvokeAsync(RefreshAfterSnapshotCapturedAsync);
         Loaded += OnLoaded;
         Closed += OnClosed;
     }
@@ -70,6 +70,18 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             _viewModel.Status = $"Browser initialization failed: {ex.Message}";
+        }
+    }
+
+    private async Task RefreshAfterSnapshotCapturedAsync()
+    {
+        try
+        {
+            await _viewModel.RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            _viewModel.Status = $"Dashboard refresh failed: {ex.Message}";
         }
     }
 

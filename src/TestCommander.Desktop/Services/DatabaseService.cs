@@ -117,7 +117,7 @@ public class DatabaseService
         }
     }
 
-    public async Task SaveResponseAsync(CapturedResponse item, CancellationToken cancellationToken = default)
+    public virtual async Task SaveResponseAsync(CapturedResponse item, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
@@ -131,7 +131,7 @@ public class DatabaseService
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    public async Task<bool> SaveSnapshotAsync(VillageSnapshot item, CancellationToken cancellationToken = default)
+    public virtual async Task<bool> SaveSnapshotAsync(VillageSnapshot item, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(item);
         await _snapshotWriteGate.WaitAsync(cancellationToken);
@@ -180,7 +180,7 @@ public class DatabaseService
         }
     }
 
-    public async Task<IReadOnlyList<CapturedResponse>> GetRecentResponsesAsync(int limit = 30, CancellationToken cancellationToken = default)
+    public virtual async Task<IReadOnlyList<CapturedResponse>> GetRecentResponsesAsync(int limit = 30, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
@@ -196,7 +196,7 @@ public class DatabaseService
         return results;
     }
 
-    public async Task<IReadOnlyList<VillageSnapshot>> GetLatestSnapshotsAsync(CancellationToken cancellationToken = default)
+    public virtual async Task<IReadOnlyList<VillageSnapshot>> GetLatestSnapshotsAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
@@ -291,7 +291,7 @@ public class DatabaseService
             StringComparer.OrdinalIgnoreCase);
     }
 
-    public async Task<int?> GetSnapshotRetentionDaysAsync(CancellationToken cancellationToken = default)
+    public virtual async Task<int?> GetSnapshotRetentionDaysAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken);
         await using (var read = connection.CreateCommand())
@@ -314,7 +314,7 @@ public class DatabaseService
         return 180;
     }
 
-    public async Task SetSnapshotRetentionDaysAsync(int? days, CancellationToken cancellationToken = default)
+    public virtual async Task SetSnapshotRetentionDaysAsync(int? days, CancellationToken cancellationToken = default)
     {
         if (days is <= 0 or > 3650)
             throw new ArgumentOutOfRangeException(nameof(days), "Retention must be between 1 and 3650 days, or null for never.");
@@ -330,7 +330,7 @@ public class DatabaseService
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    public async Task<int> PruneCapturedResponsesAsync(
+    public virtual async Task<int> PruneCapturedResponsesAsync(
         int retentionDays = 30,
         int maxRows = 5000,
         CancellationToken cancellationToken = default)
@@ -371,7 +371,7 @@ public class DatabaseService
         }
     }
 
-    public async Task<int> PruneSnapshotsAsync(int? retentionDays, CancellationToken cancellationToken = default)
+    public virtual async Task<int> PruneSnapshotsAsync(int? retentionDays, CancellationToken cancellationToken = default)
     {
         if (retentionDays is null) return 0;
         if (retentionDays <= 0 || retentionDays > 3650)
@@ -529,6 +529,7 @@ public class DatabaseService
             );
             CREATE INDEX IF NOT EXISTS ix_response_time ON captured_responses(captured_at DESC);
             CREATE INDEX IF NOT EXISTS ix_snapshot_village_time ON village_snapshots(village_name, captured_at DESC);
+            CREATE INDEX IF NOT EXISTS ix_snapshot_village_id ON village_snapshots(village_name, id);
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
     }

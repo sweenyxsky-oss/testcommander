@@ -10,6 +10,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
 {
     private const int HistorySampleLimit = 24;
     private readonly DatabaseService _database;
+    private readonly object _refreshGate = new();
+    private Task? _refreshTask;
+    private bool _refreshRequested;
     private string _status = "Starting browser…";
     private string _address = "https://www.travian.com/";
     private string _resourceSummary = "No village data captured yet";
@@ -36,7 +39,62 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public MainViewModel(DatabaseService database) => _database = database;
 
-    public async Task RefreshAsync()
+    public Task RefreshAsync()
+    {
+        TaskCompletionSource? completion = null;
+        Task refreshTask;
+        lock (_refreshGate)
+        {
+            // Keep at most one refresh in flight. If another capture arrives mid-refresh,
+            // coalesce it into one trailing refresh so the latest database state is shown.
+            _refreshRequested = true;
+            if (_refreshTask is null)
+            {
+                completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                _refreshTask = completion.Task;
+            }
+            refreshTask = _refreshTask;
+        }
+
+        if (completion is not null)
+            _ = RunRefreshLoopAsync(completion);
+
+        return refreshTask;
+    }
+
+    private async Task RunRefreshLoopAsync(TaskCompletionSource completion)
+    {
+        try
+        {
+            while (true)
+            {
+                lock (_refreshGate)
+                {
+                    if (!_refreshRequested)
+                    {
+                        _refreshTask = null;
+                        break;
+                    }
+                    _refreshRequested = false;
+                }
+
+                await RefreshCoreAsync();
+            }
+
+            completion.TrySetResult();
+        }
+        catch (Exception ex)
+        {
+            lock (_refreshGate)
+            {
+                _refreshRequested = false;
+                _refreshTask = null;
+            }
+            completion.TrySetException(ex);
+        }
+    }
+
+    private async Task RefreshCoreAsync()
     {
         if (!_retentionInitialized)
         {
