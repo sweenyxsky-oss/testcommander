@@ -46,6 +46,15 @@ public partial class MainWindow : Window
             {
                 _viewModel.Status = args.IsSuccess ? $"Page loaded: {Browser.Source?.Host}" : "Navigation did not complete successfully.";
             };
+            Browser.CoreWebView2.NavigationStarting += (_, args) =>
+            {
+                if (!Uri.TryCreate(args.Uri, UriKind.Absolute, out var targetUri) ||
+                    !NavigationSecurityPolicy.IsAllowed(targetUri, out var reason))
+                {
+                    args.Cancel = true;
+                    _viewModel.Status = reason ?? "Navigation blocked.";
+                }
+            };
             Browser.CoreWebView2.SourceChanged += (_, _) => UpdateAllowedOrigin();
             _monitor.Attach(Browser.CoreWebView2);
             UpdateAllowedOrigin();
@@ -62,7 +71,7 @@ public partial class MainWindow : Window
 
     private void UpdateAllowedOrigin()
     {
-        if (Browser.Source is { } source && (source.Scheme == Uri.UriSchemeHttps || source.IsLoopback))
+        if (Browser.Source is { } source && NavigationSecurityPolicy.IsAllowed(source, out _))
             _monitor.SetAllowedOrigin(source);
         else
             _monitor.SetAllowedOrigin(null);
@@ -70,32 +79,13 @@ public partial class MainWindow : Window
 
     private void NavigateToAddress()
     {
-        var value = _viewModel.Address.Trim();
-        if (string.IsNullOrWhiteSpace(value)) return;
-        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
+        if (!NavigationSecurityPolicy.TryParseUserAddress(_viewModel.Address, out var uri, out var error))
         {
-            if (!Uri.TryCreate("https://" + value, UriKind.Absolute, out uri))
-            {
-                _viewModel.Status = "Enter a valid website address.";
-                return;
-            }
-        }
-        if (uri.Scheme is not ("https" or "http"))
-        {
-            _viewModel.Status = "Only HTTP and HTTPS pages can be opened.";
+            _viewModel.Status = error ?? NavigationSecurityPolicy.InvalidAddressMessage;
             return;
         }
-        if (uri.Scheme == "http" && !uri.IsLoopback)
-        {
-            _viewModel.Status = "For safety, non-local sites must use HTTPS.";
-            return;
-        }
-        if (!string.IsNullOrEmpty(uri.UserInfo))
-        {
-            _viewModel.Status = "Remove embedded username/password details from the address.";
-            return;
-        }
-        _viewModel.Address = uri.ToString();
+
+        _viewModel.Address = uri!.ToString();
         _monitor.SetAllowedOrigin(uri);
         Browser.CoreWebView2?.Navigate(uri.ToString());
     }

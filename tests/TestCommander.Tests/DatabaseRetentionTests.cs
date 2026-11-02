@@ -62,6 +62,59 @@ public sealed class DatabaseRetentionTests
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => service.PruneSnapshotsAsync(-1));
     }
 
+    [Fact]
+    public async Task PrunesExpiredCapturedResponsesAndKeepsRecent()
+    {
+        using var database = new TemporaryDatabase();
+        var service = new DatabaseService(database.Path);
+        var now = DateTimeOffset.UtcNow;
+
+        await service.SaveResponseAsync(new("/api/old", "application/json", 200, 100, now.AddDays(-35), "old"));
+        await service.SaveResponseAsync(new("/api/recent", "application/json", 200, 100, now.AddDays(-5), "recent"));
+
+        var removed = await service.PruneCapturedResponsesAsync(retentionDays: 30, maxRows: 5000);
+        var remaining = await service.GetRecentResponsesAsync(10);
+
+        Assert.Equal(1, removed);
+        var response = Assert.Single(remaining);
+        Assert.Equal("/api/recent", response.UrlPath);
+    }
+
+    [Fact]
+    public async Task PrunesCapturedResponsesExceedingMaxRowsCap()
+    {
+        using var database = new TemporaryDatabase();
+        var service = new DatabaseService(database.Path);
+        var now = DateTimeOffset.UtcNow;
+
+        for (var i = 1; i <= 5; i++)
+        {
+            await service.SaveResponseAsync(new($"/api/item/{i}", "application/json", 200, 100, now.AddMinutes(-i), $"item {i}"));
+        }
+
+        var removed = await service.PruneCapturedResponsesAsync(retentionDays: 30, maxRows: 3);
+        var remaining = await service.GetRecentResponsesAsync(10);
+
+        Assert.Equal(2, removed);
+        Assert.Equal(3, remaining.Count);
+        Assert.Contains(remaining, r => r.UrlPath == "/api/item/1");
+        Assert.Contains(remaining, r => r.UrlPath == "/api/item/2");
+        Assert.Contains(remaining, r => r.UrlPath == "/api/item/3");
+    }
+
+    [Fact]
+    public async Task RejectsInvalidCapturedResponseRetentionArguments()
+    {
+        using var database = new TemporaryDatabase();
+        var service = new DatabaseService(database.Path);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => service.PruneCapturedResponsesAsync(retentionDays: 0));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => service.PruneCapturedResponsesAsync(retentionDays: -5));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => service.PruneCapturedResponsesAsync(retentionDays: 3651));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => service.PruneCapturedResponsesAsync(maxRows: 0));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => service.PruneCapturedResponsesAsync(maxRows: 100_001));
+    }
+
     private static VillageSnapshot Snapshot(string name, int wood, DateTimeOffset capturedAt) =>
         new(name, wood, 100, 100, 100, 1000, 1000, capturedAt);
 

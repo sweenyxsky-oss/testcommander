@@ -281,6 +281,47 @@ public sealed class DatabaseService
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    public async Task<int> PruneCapturedResponsesAsync(
+        int retentionDays = 30,
+        int maxRows = 5000,
+        CancellationToken cancellationToken = default)
+    {
+        if (retentionDays is <= 0 or > 3650)
+            throw new ArgumentOutOfRangeException(nameof(retentionDays), "Retention days must be between 1 and 3650.");
+        if (maxRows is <= 0 or > 100_000)
+            throw new ArgumentOutOfRangeException(nameof(maxRows), "Max rows must be between 1 and 100,000.");
+
+        var cutoff = DateTimeOffset.UtcNow.AddDays(-retentionDays).ToString("O");
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = """
+                DELETE FROM captured_responses 
+                WHERE captured_at < $cutoff;
+
+                DELETE FROM captured_responses 
+                WHERE id NOT IN (
+                    SELECT id FROM captured_responses 
+                    ORDER BY id DESC 
+                    LIMIT $maxRows
+                );
+                """;
+            command.Parameters.AddWithValue("$cutoff", cutoff);
+            command.Parameters.AddWithValue("$maxRows", maxRows);
+            var affected = await command.ExecuteNonQueryAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return affected;
+        }
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
+    }
+
     public async Task<int> PruneSnapshotsAsync(int? retentionDays, CancellationToken cancellationToken = default)
     {
         if (retentionDays is null) return 0;
