@@ -305,7 +305,7 @@ public sealed class DatabaseService
                 DELETE FROM captured_responses 
                 WHERE id NOT IN (
                     SELECT id FROM captured_responses 
-                    ORDER BY id DESC 
+                    ORDER BY captured_at DESC, id DESC 
                     LIMIT $maxRows
                 );
                 """;
