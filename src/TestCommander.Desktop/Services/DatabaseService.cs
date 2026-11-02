@@ -6,7 +6,7 @@ using TestCommander.Models;
 
 namespace TestCommander.Services;
 
-public sealed class DatabaseService
+public class DatabaseService
 {
     private readonly string _connectionString;
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
@@ -106,6 +106,7 @@ public sealed class DatabaseService
                 );
                 CREATE INDEX IF NOT EXISTS ix_response_time ON captured_responses(captured_at DESC);
                 CREATE INDEX IF NOT EXISTS ix_snapshot_village_time ON village_snapshots(village_name, captured_at DESC);
+                CREATE INDEX IF NOT EXISTS ix_snapshot_village_id ON village_snapshots(village_name, id);
                 """;
             await command.ExecuteNonQueryAsync(cancellationToken);
             _initialized = true;
@@ -242,9 +243,15 @@ public sealed class DatabaseService
         return results;
     }
 
-    public async Task<IReadOnlyDictionary<string, IReadOnlyList<VillageSnapshot>>> GetRecentSnapshotsBatchAsync(
+    public virtual async Task<IReadOnlyDictionary<string, IReadOnlyList<VillageSnapshot>>> GetRecentSnapshotsBatchAsync(
         int limit = 12, CancellationToken cancellationToken = default)
     {
+        if (limit <= 0)
+        {
+            await using var _ = await OpenAsync(cancellationToken);
+            return new Dictionary<string, IReadOnlyList<VillageSnapshot>>(StringComparer.OrdinalIgnoreCase);
+        }
+
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """

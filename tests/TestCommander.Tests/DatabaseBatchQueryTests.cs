@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using TestCommander.Models;
 using TestCommander.Services;
 using TestCommander.ViewModels;
@@ -80,6 +81,135 @@ public sealed class DatabaseBatchQueryTests
         Assert.Equal(150, v2WoodChange.Delta);
 
         Assert.Contains("2 village(s)", viewModel.ResourceSummary);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(5)]
+    [InlineData(20)]
+    public async Task RefreshAsyncMaintainsConstantHistoryReadsRegardlessOfVillageCount(int villageCount)
+    {
+        using var database = new TemporaryDatabase();
+        var service = new CountingDatabaseService(database.Path);
+        var viewModel = new MainViewModel(service);
+        var now = DateTimeOffset.UtcNow;
+
+        for (var i = 1; i <= villageCount; i++)
+        {
+            var villageName = $"Village {i}";
+            await service.SaveSnapshotAsync(new(villageName, 100, 100, 100, 100, 1000, 1000, now.AddMinutes(-5)));
+            await service.SaveSnapshotAsync(new(villageName, 150, 120, 110, 100, 1000, 1000, now));
+        }
+
+        await viewModel.RefreshAsync();
+
+        Assert.Equal(villageCount, viewModel.ResourceOverviews.Count);
+        // History query count remains strictly 1 regardless of whether village count is 1, 5, or 20
+        Assert.Equal(1, service.BatchHistoryCallCount);
+    }
+
+    [Fact]
+    public async Task GetRecentSnapshotsBatchAsyncReturnsEmptyOnEmptyDatabase()
+    {
+        using var database = new TemporaryDatabase();
+        var service = new DatabaseService(database.Path);
+
+        var batch = await service.GetRecentSnapshotsBatchAsync(limit: 12);
+
+        Assert.NotNull(batch);
+        Assert.Empty(batch);
+    }
+
+    [Fact]
+    public async Task GetRecentSnapshotsBatchAsyncReturnsEmptyWhenLimitIsZero()
+    {
+        using var database = new TemporaryDatabase();
+        var service = new DatabaseService(database.Path);
+        await service.SaveSnapshotAsync(new("Village Alpha", 100, 100, 100, 100, 1000, 1000, DateTimeOffset.UtcNow));
+
+        var batch = await service.GetRecentSnapshotsBatchAsync(limit: 0);
+
+        Assert.NotNull(batch);
+        Assert.Empty(batch);
+    }
+
+    [Fact]
+    public async Task GetRecentSnapshotsBatchAsyncReturnsSingleLatestSnapshotWhenLimitIsOne()
+    {
+        using var database = new TemporaryDatabase();
+        var service = new DatabaseService(database.Path);
+        var now = DateTimeOffset.UtcNow;
+
+        await service.SaveSnapshotAsync(new("Village Alpha", 100, 100, 100, 100, 1000, 1000, now.AddMinutes(-5)));
+        await service.SaveSnapshotAsync(new("Village Alpha", 150, 120, 110, 100, 1000, 1000, now));
+
+        await service.SaveSnapshotAsync(new("Village Beta", 200, 200, 200, 200, 1000, 1000, now.AddMinutes(-5)));
+        await service.SaveSnapshotAsync(new("Village Beta", 250, 220, 210, 200, 1000, 1000, now));
+
+        var batch = await service.GetRecentSnapshotsBatchAsync(limit: 1);
+
+        Assert.Equal(2, batch.Count);
+
+        var alphaHistory = batch["Village Alpha"];
+        Assert.Single(alphaHistory);
+        Assert.Equal(150, alphaHistory[0].Wood);
+
+        var betaHistory = batch["Village Beta"];
+        Assert.Single(betaHistory);
+        Assert.Equal(250, betaHistory[0].Wood);
+    }
+
+    [Fact]
+    public async Task BatchQueryUsesVillageNameIdIndexAccordingToQueryPlan()
+    {
+        using var database = new TemporaryDatabase();
+        var service = new DatabaseService(database.Path);
+        // Ensure schema and tables/indexes are created
+        await service.SaveSnapshotAsync(new("Village 1", 100, 100, 100, 100, 1000, 1000, DateTimeOffset.UtcNow));
+
+        await using var connection = new SqliteConnection($"Data Source={database.Path}");
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            EXPLAIN QUERY PLAN
+            WITH RankedSnapshots AS (
+                SELECT id, village_name, wood, clay, iron, crop, 
+                       warehouse_capacity, granary_capacity, captured_at,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY village_name 
+                           ORDER BY id DESC
+                       ) AS rank_index
+                FROM village_snapshots
+            )
+            SELECT village_name, wood, clay, iron, crop, 
+                   warehouse_capacity, granary_capacity, captured_at
+            FROM RankedSnapshots
+            WHERE rank_index <= 12
+            ORDER BY village_name, id ASC;
+            """;
+
+        var queryPlanLines = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            var detail = reader.GetString(reader.GetOrdinal("detail"));
+            queryPlanLines.Add(detail);
+        }
+
+        var fullPlan = string.Join("\n", queryPlanLines);
+        Assert.Contains("USING INDEX ix_snapshot_village_id", fullPlan);
+    }
+
+    private sealed class CountingDatabaseService(string? databasePath = null) : DatabaseService(databasePath)
+    {
+        public int BatchHistoryCallCount { get; private set; }
+
+        public override Task<IReadOnlyDictionary<string, IReadOnlyList<VillageSnapshot>>> GetRecentSnapshotsBatchAsync(
+            int limit = 12, CancellationToken cancellationToken = default)
+        {
+            BatchHistoryCallCount++;
+            return base.GetRecentSnapshotsBatchAsync(limit, cancellationToken);
+        }
     }
 
     private sealed class TemporaryDatabase : IDisposable
