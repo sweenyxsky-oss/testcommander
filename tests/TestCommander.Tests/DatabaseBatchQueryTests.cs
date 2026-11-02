@@ -226,6 +226,7 @@ public sealed class DatabaseBatchQueryTests
         using var database = new TemporaryDatabase();
         var originalName = "Preserved village";
         var originalCapturedAt = DateTimeOffset.UtcNow.ToString("O");
+        Directory.CreateDirectory(database.DirectoryPath);
 
         // Simulate a database created by an earlier version without the new index.
         var connectionString = new SqliteConnectionStringBuilder
