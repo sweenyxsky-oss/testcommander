@@ -48,8 +48,12 @@ public partial class MainWindow : Window
             };
             Browser.CoreWebView2.NavigationStarting += (_, args) =>
             {
-                if (!Uri.TryCreate(args.Uri, UriKind.Absolute, out var targetUri) ||
-                    !NavigationSecurityPolicy.IsAllowed(targetUri, out var reason))
+                if (!Uri.TryCreate(args.Uri, UriKind.Absolute, out var targetUri))
+                {
+                    args.Cancel = true;
+                    _viewModel.Status = NavigationSecurityPolicy.InvalidAddressMessage;
+                }
+                else if (!NavigationSecurityPolicy.IsAllowed(targetUri, out var reason))
                 {
                     args.Cancel = true;
                     _viewModel.Status = reason ?? "Navigation blocked.";
