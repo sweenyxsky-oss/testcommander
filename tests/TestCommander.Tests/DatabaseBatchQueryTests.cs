@@ -167,35 +167,45 @@ public sealed class DatabaseBatchQueryTests
         // Ensure schema and tables/indexes are created
         await service.SaveSnapshotAsync(new("Village 1", 100, 100, 100, 100, 1000, 1000, DateTimeOffset.UtcNow));
 
-        await using var connection = new SqliteConnection($"Data Source={database.Path}");
-        await connection.OpenAsync();
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            EXPLAIN QUERY PLAN
-            WITH RankedSnapshots AS (
-                SELECT id, village_name, wood, clay, iron, crop, 
-                       warehouse_capacity, granary_capacity, captured_at,
-                       ROW_NUMBER() OVER (
-                           PARTITION BY village_name 
-                           ORDER BY id DESC
-                       ) AS rank_index
-                FROM village_snapshots
-            )
-            SELECT village_name, wood, clay, iron, crop, 
-                   warehouse_capacity, granary_capacity, captured_at
-            FROM RankedSnapshots
-            WHERE rank_index <= 12
-            ORDER BY village_name, id ASC;
-            """;
-
         var queryPlanLines = new List<string>();
-        await using var reader = await command.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
+        var connectionString = new SqliteConnectionStringBuilder
         {
-            var detail = reader.GetString(reader.GetOrdinal("detail"));
-            queryPlanLines.Add(detail);
+            DataSource = database.Path,
+            Mode = SqliteOpenMode.ReadOnly,
+            Pooling = false
+        }.ToString();
+
+        await using (var connection = new SqliteConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                EXPLAIN QUERY PLAN
+                WITH RankedSnapshots AS (
+                    SELECT id, village_name, wood, clay, iron, crop, 
+                           warehouse_capacity, granary_capacity, captured_at,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY village_name 
+                               ORDER BY id DESC
+                           ) AS rank_index
+                    FROM village_snapshots
+                )
+                SELECT village_name, wood, clay, iron, crop, 
+                       warehouse_capacity, granary_capacity, captured_at
+                FROM RankedSnapshots
+                WHERE rank_index <= 12
+                ORDER BY village_name, id ASC;
+                """;
+
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                var detail = reader.GetString(reader.GetOrdinal("detail"));
+                queryPlanLines.Add(detail);
+            }
         }
 
+        SqliteConnection.ClearAllPools();
         var fullPlan = string.Join("\n", queryPlanLines);
         Assert.Contains("USING INDEX ix_snapshot_village_id", fullPlan);
     }
@@ -220,8 +230,15 @@ public sealed class DatabaseBatchQueryTests
 
         public void Dispose()
         {
-            if (System.IO.Directory.Exists(DirectoryPath))
-                System.IO.Directory.Delete(DirectoryPath, recursive: true);
+            SqliteConnection.ClearAllPools();
+            try
+            {
+                if (System.IO.Directory.Exists(DirectoryPath))
+                    System.IO.Directory.Delete(DirectoryPath, recursive: true);
+            }
+            catch (IOException)
+            {
+            }
         }
     }
 }
