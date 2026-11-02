@@ -242,6 +242,48 @@ public sealed class DatabaseService
         return results;
     }
 
+    public async Task<IReadOnlyDictionary<string, IReadOnlyList<VillageSnapshot>>> GetRecentSnapshotsBatchAsync(
+        int limit = 12, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            WITH RankedSnapshots AS (
+                SELECT id, village_name, wood, clay, iron, crop, 
+                       warehouse_capacity, granary_capacity, captured_at,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY village_name 
+                           ORDER BY id DESC
+                       ) AS rank_index
+                FROM village_snapshots
+            )
+            SELECT village_name, wood, clay, iron, crop, 
+                   warehouse_capacity, granary_capacity, captured_at
+            FROM RankedSnapshots
+            WHERE rank_index <= $limit
+            ORDER BY village_name, id ASC;
+            """;
+        command.Parameters.AddWithValue("$limit", Math.Clamp(limit, 1, 500));
+        var dictionary = new Dictionary<string, List<VillageSnapshot>>(StringComparer.OrdinalIgnoreCase);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            if (!DateTimeOffset.TryParse(reader.GetString(7), out var captured)) continue;
+            var snapshot = ReadSnapshot(reader, captured);
+            if (!dictionary.TryGetValue(snapshot.VillageName, out var list))
+            {
+                list = [];
+                dictionary[snapshot.VillageName] = list;
+            }
+            list.Add(snapshot);
+        }
+
+        return dictionary.ToDictionary(
+            kvp => kvp.Key,
+            kvp => (IReadOnlyList<VillageSnapshot>)kvp.Value,
+            StringComparer.OrdinalIgnoreCase);
+    }
+
     public async Task<int?> GetSnapshotRetentionDaysAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken);

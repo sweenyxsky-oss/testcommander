@@ -56,9 +56,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
         ResourceOverviews.Clear();
         VillageComparisons.Clear();
         var latestSnapshots = await _database.GetLatestSnapshotsAsync();
+        var batchHistory = await _database.GetRecentSnapshotsBatchAsync(HistorySampleLimit);
         foreach (var latest in latestSnapshots)
         {
-            var history = await _database.GetRecentSnapshotsAsync(latest.VillageName, HistorySampleLimit);
+            var history = batchHistory.TryGetValue(latest.VillageName, out var list)
+                ? list
+                : [latest];
             var current = history.Count > 0 ? history[^1] : latest;
             var previous = history.Count > 1 ? history[^2] : null;
             ResourceOverviews.Add(VillageResourceCalculator.Create(current, previous, history));
